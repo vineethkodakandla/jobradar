@@ -233,6 +233,39 @@ def update_job_embedding(client: Client, job_id: int, vector_literal: str) -> No
     client.table("jobs").update({"embedding": vector_literal}).eq("id", job_id).execute()
 
 
+def bulk_write_job_embeddings(client: Client, rows: list[dict[str, Any]]) -> int:
+    """Batch-write embeddings via one upsert per chunk (not one UPDATE per job).
+
+    Each row must already carry its identity columns + the ``embedding`` pgvector
+    literal. Conflicts on the existing (source_id, external_id) unique key and
+    updates only the embedding-bearing slim payload. The previous per-row UPDATE
+    loop did thousands of sequential round-trips and blew the Actions time budget.
+    NB: ``id`` is GENERATED ALWAYS, so it is intentionally omitted from the payload.
+    """
+    slim = [
+        {
+            "source_id": r["source_id"],
+            "external_id": r["external_id"],
+            "dedupe_hash": r["dedupe_hash"],
+            "title": r["title"],
+            "apply_url": r["apply_url"],
+            "embedding": r["embedding"],
+        }
+        for r in rows
+        if r.get("embedding") and r.get("source_id") and r.get("external_id")
+    ]
+    if not slim:
+        return 0
+    n = 0
+    CHUNK = 500
+    for i in range(0, len(slim), CHUNK):
+        chunk = slim[i : i + CHUNK]
+        client.table("jobs").upsert(chunk, on_conflict="source_id,external_id").execute()
+        n += len(chunk)
+    log.info("Bulk-wrote %d job embeddings.", n)
+    return n
+
+
 def fetch_active_jobs_for_scoring(
     client: Client, columns: Optional[str] = None
 ) -> list[dict[str, Any]]:

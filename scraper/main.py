@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 import traceback
 from dataclasses import dataclass, field
@@ -73,6 +74,26 @@ EASTERN = ZoneInfo("America/New_York")
 WINDOW_START = dtime(5, 45)
 WINDOW_END = dtime(6, 55)
 COMPANIES_YML = os.path.join(os.path.dirname(os.path.abspath(__file__)), "companies.yml")
+
+# ATS boards (greenhouse/lever/ashby) return EVERY role at a company (sales,
+# marketing, ops, ...). The owner only wants tech roles, so filter ATS titles to
+# engineering / ML / AI / data / SWE / FDE. Aggregators are already query-scoped
+# to these roles, so they are left unfiltered.
+_ATS_SLUGS = {"greenhouse", "lever", "ashby"}
+_TECH_TITLE_RE = re.compile(
+    r"(engineer|engineering|developer|software|\bswe\b|\bsde\b|programmer|"
+    r"architect|machine learning|\bml\b|artificial intelligence|\bai\b|"
+    r"data scien|data engineer|scientist|backend|back[- ]end|frontend|"
+    r"front[- ]end|full[- ]?stack|platform|infrastructure|devops|mlops|"
+    r"\bsre\b|site reliability|applied scien|research|forward deployed|\bfde\b|"
+    r"\bnlp\b|\bllm\b|deep learning|computer vision|robotics|firmware|embedded|"
+    r"technical staff|analytics)",
+    re.I,
+)
+
+
+def is_tech_title(title: str) -> bool:
+    return bool(_TECH_TITLE_RE.search(title or ""))
 
 
 # --- environment -------------------------------------------------------------
@@ -206,6 +227,12 @@ def run_scrape(client, env: Env, run_started_at: datetime) -> RunState:
                 nj = normalize.normalize_job(rj)
                 if nj is not None:
                     normalized.append(nj)
+            # ATS boards list every role at a company — keep only tech titles.
+            if slug in _ATS_SLUGS:
+                before = len(normalized)
+                normalized = [nj for nj in normalized if is_tech_title(nj.get("title", ""))]
+                log.info("Source %r: ATS title filter %d -> %d tech roles.",
+                         slug, before, len(normalized))
             all_normalized.extend(normalized)
             state.jobs_seen += len(normalized)
             state.succeeded_source_ids.append(src_row["id"])
@@ -288,9 +315,9 @@ def run_fit(client, env: Env, upserted_rows: list[dict[str, Any]]) -> int:
         ]
         vecs = fit.embed_texts(texts)
         for row, vec in zip(jobs_needing_embed, vecs):
-            literal = fit.vector_to_pg_literal(vec)
-            db.update_job_embedding(client, row["id"], literal)
-            row["embedding"] = literal  # so the scoring pass below sees it
+            row["embedding"] = fit.vector_to_pg_literal(vec)  # scoring pass sees it
+        # One upsert per chunk instead of one UPDATE per job (time-budget fix).
+        db.bulk_write_job_embeddings(client, jobs_needing_embed)
 
     # 3) Decide scope: profile changed -> ALL active jobs; else just the upserts.
     if profile_changed:
