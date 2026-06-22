@@ -73,10 +73,10 @@ log = logging.getLogger("jobradar.main")
 EASTERN = ZoneInfo("America/New_York")
 WINDOW_START = dtime(5, 45)
 WINDOW_END = dtime(6, 55)
-# We now scrape several times a day on a fixed interval (cron), so there is no
-# daily time-of-day window. This dedup only stops a duplicate cron fire from
-# re-running within the interval; manual/dispatch triggers always run.
-RECENT_SUCCESS_MINUTES = 120
+# We scrape hourly (cron), so there is no daily time-of-day window. This dedup
+# only stops a duplicate cron fire from re-running within the hour (must be < 60
+# so back-to-back hourly runs are NOT skipped); manual/dispatch always run.
+RECENT_SUCCESS_MINUTES = 45
 COMPANIES_YML = os.path.join(os.path.dirname(os.path.abspath(__file__)), "companies.yml")
 
 # ATS boards (greenhouse/lever/ashby) return EVERY role at a company (sales,
@@ -169,21 +169,31 @@ def load_company_tokens() -> dict[str, list[str]]:
     }
 
 
-# Adzuna allows 2,500 API calls/MONTH. Since we now scrape several times a day,
-# cap per-run usage and stop calling Adzuna once the month's budget is spent.
+# Adzuna allows 2,500 API calls/MONTH. Since we now scrape hourly, cap per-run
+# usage AND only run the rate-sensitive sources every COURTESY_INTERVAL_HOURS.
 ADZUNA_PER_RUN = 20
 ADZUNA_MONTHLY_CAP = 2400
+# Rate-sensitive sources (Adzuna/Remotive/RemoteOK) run only when the UTC hour is
+# a multiple of this — i.e. 4x/day at 00/06/12/18 UTC — not on every hourly run.
+COURTESY_INTERVAL_HOURS = 6
 
 
 def build_sources(
-    env: Env, tokens: dict[str, list[str]], adzuna_budget: int
+    env: Env, tokens: dict[str, list[str]], adzuna_budget: int, run_courtesy: bool
 ) -> tuple[list[Any], Optional[AdzunaSource]]:
-    """Instantiate the enabled sources. Returns (sources, adzuna_or_None)."""
+    """Instantiate the enabled sources. Returns (sources, adzuna_or_None).
+
+    ``run_courtesy`` gates the rate-sensitive sources (Adzuna's monthly cap +
+    Remotive/RemoteOK courtesy endpoints) so they run only a few times a day,
+    while the company ATS boards + The Muse run on every (hourly) scrape.
+    """
     sources: list[Any] = []
     adzuna: Optional[AdzunaSource] = None
 
     if env.adzuna_app_id and env.adzuna_app_key:
-        if adzuna_budget > 0:
+        if not run_courtesy:
+            log.info("Adzuna throttled this run (courtesy cadence).")
+        elif adzuna_budget > 0:
             adzuna = AdzunaSource(
                 env.adzuna_app_id, env.adzuna_app_key, call_budget=adzuna_budget
             )
@@ -193,12 +203,15 @@ def build_sources(
     else:
         log.warning("Adzuna keys missing — skipping Adzuna source (run continues).")
 
-    sources.append(TheMuseSource())
-    sources.append(RemotiveSource())
-    sources.append(RemoteOKSource())
-    sources.append(GreenhouseSource(tokens.get("greenhouse", [])))
-    sources.append(LeverSource(tokens.get("lever", [])))
-    sources.append(AshbySource(tokens.get("ashby", [])))
+    sources.append(TheMuseSource())                      # API, tolerant — every run
+    if run_courtesy:
+        sources.append(RemotiveSource())                 # courtesy endpoint — throttled
+        sources.append(RemoteOKSource())                 # courtesy endpoint — throttled
+    else:
+        log.info("Remotive/RemoteOK throttled this run (courtesy cadence).")
+    sources.append(GreenhouseSource(tokens.get("greenhouse", [])))  # ATS — every run
+    sources.append(LeverSource(tokens.get("lever", [])))            # ATS — every run
+    sources.append(AshbySource(tokens.get("ashby", [])))           # ATS — every run
     return sources, adzuna
 
 
@@ -217,7 +230,9 @@ class RunState:
 
 # --- main scrape body --------------------------------------------------------
 
-def run_scrape(client, env: Env, run_started_at: datetime) -> RunState:
+def run_scrape(
+    client, env: Env, run_started_at: datetime, run_courtesy: bool
+) -> RunState:
     state = RunState()
     source_map = db.load_source_map(client)
     tokens = load_company_tokens()
@@ -227,7 +242,7 @@ def run_scrape(client, env: Env, run_started_at: datetime) -> RunState:
     except Exception as exc:
         log.warning("Could not read monthly Adzuna usage (%s) — assuming 0.", exc)
     adzuna_budget = max(0, min(ADZUNA_PER_RUN, ADZUNA_MONTHLY_CAP - adzuna_used))
-    sources, adzuna = build_sources(env, tokens, adzuna_budget)
+    sources, adzuna = build_sources(env, tokens, adzuna_budget, run_courtesy)
 
     all_normalized: list[dict[str, Any]] = []
 
@@ -508,10 +523,13 @@ def main() -> int:
 
     # --- real run ---
     run_started_at = datetime.now(timezone.utc)
+    # Rate-sensitive sources run only every COURTESY_INTERVAL_HOURS (or always on
+    # a manual trigger); the ATS boards + Muse run on every hourly scrape.
+    run_courtesy = is_manual or (run_started_at.hour % COURTESY_INTERVAL_HOURS == 0)
     run_id = db.start_run(client, trigger=env.trigger, status="running")
 
     try:
-        state = run_scrape(client, env, run_started_at)
+        state = run_scrape(client, env, run_started_at, run_courtesy)
     except Exception as exc:
         err = f"{exc}\n{traceback.format_exc()}"
         log.error("Run FAILED: %s", err)

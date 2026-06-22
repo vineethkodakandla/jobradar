@@ -1,12 +1,12 @@
 name: daily-scrape
 
-# Scrapes 4x/day (every 6 hours). No fixed time-of-day window — main.py runs on
-# every cron fire (with a short dedup guard so a duplicate fire is a no-op).
-# workflow_dispatch + repository_dispatch (the in-app Refresh button) trigger an
-# extra run anytime. Adzuna's 2,500/month cap is enforced in main.py.
+# Scrapes HOURLY. The ATS boards + The Muse run every hour; the rate-sensitive
+# sources (Adzuna/Remotive/RemoteOK) run only 4x/day (main.py courtesy gate).
+# Needs unlimited Actions minutes -> the repo is public. workflow_dispatch +
+# repository_dispatch (the in-app Refresh button) trigger an extra run anytime.
 on:
   schedule:
-    - cron: "0 */6 * * *" # every 6 hours (00:00 / 06:00 / 12:00 / 18:00 UTC)
+    - cron: "0 * * * *" # hourly, top of the hour (UTC)
   workflow_dispatch: {}
   repository_dispatch:
     types: [manual-scrape]
