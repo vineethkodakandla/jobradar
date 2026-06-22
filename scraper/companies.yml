@@ -1,0 +1,77 @@
+# =============================================================================
+# JobRadar — curated ATS board tokens / handles.
+#
+# This list IS your ATS coverage (ATS boards are per-company, not searchable).
+# Keyed by ATS kind; each value is a list of the board token/handle that appears
+# in that ATS's public URL:
+#
+#   greenhouse -> https://boards-api.greenhouse.io/v1/boards/<TOKEN>/jobs
+#   lever      -> https://api.lever.co/v0/postings/<HANDLE>?mode=json
+#   ashby      -> https://api.ashbyhq.com/posting-api/job-board/<BOARD>?includeCompensation=true
+#
+# HOW TO ADD MORE:
+#   1. Open a company's careers page, open DevTools -> Network, reload.
+#   2. Find the XHR to boards-api.greenhouse.io / api.lever.co / api.ashbyhq.com.
+#   3. Copy the <TOKEN>/<HANDLE>/<BOARD> segment from that URL and add it below.
+#   4. A dead/renamed token just logs a warning and is skipped — it never fails
+#      the run — so a stale entry is harmless (but prune them occasionally).
+#
+# Seeded with well-known PUBLIC boards so the first smoke test isn't empty.
+# Token availability/shape can change without notice; treat ATS as best-effort.
+# =============================================================================
+
+greenhouse:
+  - stripe
+  - databricks
+  - airbnb
+  - dropbox
+  - robinhood
+  - cloudflare
+  - coinbase
+  - gitlab
+  - benchling
+  - lyft
+  - doordash
+  - instacart
+  - affirm
+  - brex
+  - retool
+  - mixpanel
+  - asana
+  - samsara
+  - sourcegraph
+  - twilio
+  - hashicorp
+  - discord
+  - reddit
+  - pinterest
+  - flexport
+
+lever:
+  - palantir
+  - plaid
+  - netflix
+  - spotify
+  - ramp
+  - voleon
+  - mistral
+  - leverdemo
+  - matchgroup
+  - kong
+
+ashby:
+  - openai
+  - ramp
+  - notion
+  - linear
+  - vanta
+  - mercury
+  - runwayml
+  - hex
+  - clay
+  - cohere
+  - posthog
+  - replit
+  - tome
+  - modal
+  - baseten

@@ -1,0 +1,58 @@
+name: daily-scrape
+
+# Two cron lines absorb US DST: exactly one fires inside 05:45–06:55 ET each day
+# (main.py's time-guard skips the other). The wide window survives GitHub's
+# 5–15 min cron lag. workflow_dispatch + repository_dispatch always run.
+on:
+  schedule:
+    - cron: "10 10 * * *" # 06:10 EDT (summer) — fires the run
+    - cron: "10 11 * * *" # 06:10 EST (winter) — fires the run
+  workflow_dispatch: {}
+  repository_dispatch:
+    types: [manual-scrape]
+
+concurrency:
+  group: scrape
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Cache Hugging Face model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-all-MiniLM-L6-v2
+
+      - name: Install dependencies
+        run: pip install -r scraper/requirements.txt
+
+      - name: Determine trigger
+        id: trig
+        run: |
+          case "${{ github.event_name }}" in
+            repository_dispatch) echo "trigger=manual"   >> "$GITHUB_OUTPUT" ;;
+            workflow_dispatch)   echo "trigger=dispatch" >> "$GITHUB_OUTPUT" ;;
+            *)                   echo "trigger=cron"     >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Run scraper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          OWNER_USER_ID: ${{ secrets.OWNER_USER_ID }}
+          ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
+          ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          USE_LLM_RATIONALE: ${{ vars.USE_LLM_RATIONALE }}
+          SCRAPE_TRIGGER: ${{ steps.trig.outputs.trigger }}
+        run: python -m scraper.main

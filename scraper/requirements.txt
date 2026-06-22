@@ -1,0 +1,14 @@
+# JobRadar scraper dependencies (pinned to known-good ranges).
+# Install:  pip install -r scraper/requirements.txt
+
+requests==2.32.3
+feedparser==6.0.11
+beautifulsoup4==4.12.3
+PyYAML==6.0.2
+numpy==1.26.4
+supabase==2.9.1
+sentence-transformers==3.3.1
+anthropic==0.40.0
+
+# Test-only (safe to install everywhere; CI runs pytest on normalize).
+pytest==8.3.4

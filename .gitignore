@@ -1,0 +1,48 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# next.js
+/.next/
+/out/
+next-env.d.ts
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+Thumbs.db
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local env files
+.env
+.env*.local
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+
+# python
+scraper/__pycache__/
+scraper/**/__pycache__/
+scraper/.venv/
+scraper/*.egg-info/
+.pytest_cache/
+*.pyc
+
+# local model cache (if run locally)
+scraper/.hf_cache/
+
+.vercel
+
+# local convenience (generated)
+supabase/setup_all.sql

@@ -1,0 +1,120 @@
+@import "tailwindcss";
+
+/* Class-based dark mode (next-themes toggles .dark on <html>). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: 0 0% 100%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --muted: 210 40% 96%;
+  --muted-foreground: 215 16% 47%;
+  --border: 214 32% 91%;
+  --input: 214 32% 91%;
+  --ring: 243 75% 59%;
+  --primary: 243 75% 59%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 214 95% 93%;
+  --accent-foreground: 222 47% 11%;
+  --radius: 0.625rem;
+
+  /* Fit-tier ramp (must match lib/fit.ts getFitTier) */
+  --fit-strong: 152 60% 40%;
+  --fit-good: 38 92% 50%;
+  --fit-stretch: 215 16% 47%;
+  --fit-low: 0 60% 55%;
+}
+
+.dark {
+  --background: 222 47% 7%;
+  --foreground: 210 40% 98%;
+  --card: 222 47% 9%;
+  --card-foreground: 210 40% 98%;
+  --muted: 217 33% 15%;
+  --muted-foreground: 215 20% 65%;
+  --border: 217 33% 19%;
+  --input: 217 33% 19%;
+  --ring: 243 75% 66%;
+  --primary: 243 75% 66%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 217 40% 22%;
+  --accent-foreground: 210 40% 98%;
+
+  --fit-strong: 152 55% 48%;
+  --fit-good: 38 92% 55%;
+  --fit-stretch: 215 18% 60%;
+  --fit-low: 0 65% 62%;
+}
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-fit-strong: hsl(var(--fit-strong));
+  --color-fit-good: hsl(var(--fit-good));
+  --color-fit-stretch: hsl(var(--fit-stretch));
+  --color-fit-low: hsl(var(--fit-low));
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thin, theme-aware scrollbars for the scroll panes. */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--border));
+  border-radius: 9999px;
+}
+
+/* Lightweight fade used by modal/dropdown portals. */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

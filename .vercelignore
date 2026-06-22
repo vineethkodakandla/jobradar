@@ -1,0 +1,15 @@
+# Vercel only builds/serves the Next.js app. Everything below is the
+# scraper / database / CI half that runs in GitHub Actions, not on Vercel.
+# NOTE: leading slash anchors to the repo root so these don't also match
+# lib/supabase/ etc. (an unanchored "supabase/" would exclude lib/supabase!).
+/scraper/
+/supabase/
+/.github/
+
+# Never upload local secrets, deps, or build artifacts (Vercel rebuilds these).
+.env
+.env*.local
+/node_modules
+/.next
+/.git
+/.vercel
