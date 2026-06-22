@@ -1,128 +1,130 @@
-# JobRadar
+<div align="center">
 
-A private, single-owner, LinkedIn-style job board for one early-career AI/ML engineer. It scrapes **free** job APIs + company ATS boards once daily, normalizes and de-duplicates listings into Supabase Postgres, computes a **$0** local-embedding "fit score + rationale" against your editable skills profile, and serves a fast three-pane dashboard (filter rail / job list / detail) with saved jobs, an application-status tracker, and a link out to your portfolio.
+# 🛰️ JobRadar
 
-Designed to run entirely inside free tiers: **Vercel Hobby** (UI), **Supabase free** (Postgres/Auth/pgvector), **GitHub Actions free minutes** (the daily Python scraper), and free API tiers. No paid call sits on any critical path.
+**A private, AI-scored job board that scrapes the open web hourly and ranks every role against your résumé — built to run entirely on free tiers.**
+
+[![Next.js](https://img.shields.io/badge/Next.js-15-000000?logo=next.js)](https://nextjs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![Supabase](https://img.shields.io/badge/Supabase-Postgres%20%2B%20pgvector-3FCF8E?logo=supabase&logoColor=white)](https://supabase.com)
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org)
+[![GitHub Actions](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white)](.github/workflows/scrape.yml)
+[![Vercel](https://img.shields.io/badge/Deploy-Vercel-000000?logo=vercel)](https://vercel.com)
+
+</div>
 
 ---
 
-## Architecture
+LinkedIn shows you everyone's jobs. **JobRadar shows you *yours*** — it pulls fresh postings from job APIs and company career boards every hour, computes a 0–100 **fit score + rationale** for each one against an editable skills profile using local sentence embeddings, and serves it all through a fast three-pane dashboard with saved jobs and an application tracker. No LLM API bill, no paid infrastructure — the whole pipeline lives inside Vercel Hobby + Supabase free + GitHub Actions.
+
+<!-- Add a screenshot at docs/screenshot.png and uncomment the line below:
+![JobRadar dashboard](docs/screenshot.png)
+-->
+> 📸 _Add `docs/screenshot.png` (the three-pane dashboard) to show it off here._
+
+## ✨ Features
+
+- **Hourly multi-source ingestion** — aggregator APIs (Adzuna, The Muse, Remotive, RemoteOK) **+** company ATS boards (Greenhouse, Lever, Ashby). No LinkedIn/Indeed scraping — public JSON only.
+- **$0 semantic fit scoring** — a local `all-MiniLM-L6-v2` embedding of your résumé is cosine-matched against every job, blended with skill-overlap, experience-level, location, and recency signals into one 0–100 score with a plain-English rationale. No paid LLM on any critical path.
+- **Smart, rate-aware scheduling** — ATS boards refresh every hour (where roles post first); rate-sensitive sources throttle to 4×/day; Adzuna's monthly free cap is enforced in code.
+- **Three-pane dashboard** — filter rail / virtualized job list / detail pane, with URL-synced filters (role, experience, US location, work type, salary, fit threshold), an editable skills profile that re-scores on save, saved jobs, and a drag-and-drop application tracker.
+- **Single-owner by design** — a server-side access-code gate (signed http-only cookie; the code never reaches the browser) + Postgres Row-Level Security. Your saved jobs and notes are never public.
+- **Free-tier native** — the web app *only reads* precomputed data; all scraping, embedding, and scoring happen in a GitHub Actions cron, so Vercel functions stay fast and free.
+
+## 🧠 How the fit score works
+
+Each job is compared to your profile across five weighted signals (all computed locally, no LLM):
+
+| Signal | Weight | Measures |
+|---|---:|---|
+| Semantic match | 35% | cosine(résumé embedding, job embedding) via MiniLM, rescaled |
+| Skill overlap | 30% | alias-aware, weight-weighted match of your skills vs. the job |
+| Experience match | 20% | intern/new-grad → 1.0 · mid → 0.55–1.0 · senior → 0.30 |
+| Location / work-type | 10% | remote → 1.0 · US on-site/hybrid → 0.8 · on-site abroad → 0.0 |
+| Recency | 5% | ≤3d → 1.0 … >30d → 0.2 |
 
 ```
-┌────────────────────┐     reads (RLS, owner)      ┌──────────────────────┐
-│  Next.js 15 (Vercel)│ ──────────────────────────▶ │  Supabase Postgres   │
-│  App Router + RSC   │ ◀────────────────────────── │  (jobs, fit, saved,  │
-│  three-pane UI      │     access-code gate        │   applications, runs)│
-└─────────┬──────────┘                              └──────────▲───────────┘
-          │ POST /api/refresh                                  │ upserts
-          │ (repository_dispatch)                              │ (service role)
-          ▼                                                    │
-┌────────────────────────────────────────────────────┐        │
-│  GitHub Actions cron (Python)                       │ ───────┘
-│  scrape → normalize → dedupe → embed → fit-score    │
-│  daily 05:45–06:55 ET (two-cron DST guard)          │
-└────────────────────────────────────────────────────┘
+fit = 100 × (0.35·semantic + 0.30·skills + 0.20·experience + 0.10·location + 0.05·recency)
 ```
 
-The Next.js app **only ever reads** precomputed data — no scraping, embedding, or LLM inference happens in a Vercel function. All heavy work lives in the GitHub Action.
+Hard caps then apply for dealbreakers (on-site outside the US → ≤20; zero must-have skills → ≤45; senior role → ≤74). Bands: **Strong ≥78 · Good 62–77 · Stretch 45–61 · Low <45**. The exact band cutoffs live in one place (`lib/fit.ts`) shared by the UI and the Python scorer.
+
+## 🏗️ Architecture
 
 ```
-app/                Next.js App Router
+┌─────────────────────┐     reads (RLS + code gate)   ┌──────────────────────┐
+│  Next.js 15 (Vercel) │ ────────────────────────────▶ │  Supabase Postgres   │
+│  App Router · RSC    │ ◀──────────────────────────── │  jobs · job_fit ·    │
+│  3-pane dashboard    │                               │  saved · apps · runs │
+└──────────┬──────────┘                               │  (pgvector)          │
+           │ POST /api/refresh                         └──────────▲───────────┘
+           │ (repository_dispatch)                                │ upserts
+           ▼                                                      │ (service role)
+┌──────────────────────────────────────────────────────┐         │
+│  GitHub Actions cron (Python) — HOURLY                │ ────────┘
+│  scrape → normalize → dedupe → embed → fit-score      │
+└──────────────────────────────────────────────────────┘
+```
+
+The two halves share **only** the Postgres schema — no runtime coupling. The web app never scrapes, embeds, or runs inference; the scraper never renders UI.
+
+## 🧰 Tech stack
+
+**Frontend** Next.js 15 (App Router, RSC, Server Actions) · TypeScript · Tailwind v4 · TanStack Query · nuqs (URL state) · dnd-kit · `@tanstack/react-virtual`
+**Backend / data** Supabase (Postgres + Auth + **pgvector**) · Row-Level Security · a `search_jobs` SQL function for filtered, fit-sorted, paginated reads
+**Scraper / ML** Python 3.12 · `sentence-transformers` (MiniLM, 384-dim) · `requests`/`beautifulsoup4` · `supabase-py`
+**Infra** Vercel (web) · GitHub Actions (hourly cron, free unlimited minutes on a public repo)
+
+## 📁 Project structure
+
+```
+app/
   (app)/            code-gated dashboard (feed, jobs, saved, tracker, skills, settings)
   api/              route handlers (jobs, saved, applications, profile, refresh, runs, gate)
-  auth/             signout (clears the access cookie)
-  login/            the access-code gate page
-components/         UI (app shell, feed, tracker, skills, ui primitives)
-lib/                shared contracts: types, fit, filters, utils, time, supabase clients
-scraper/            Python: the daily ingest + fit-scoring job (NOT built by Vercel)
+  login/  auth/     access-code gate + signout
+components/         UI — app shell, feed, tracker, skills, ui primitives
+lib/                shared contracts: types, fit (band cutoffs), filters, supabase clients
+scraper/            Python pipeline: sources/ · normalize · fit · db · main
 supabase/           migrations (0001 schema, 0002 search RPC) + seed
-.github/workflows/  scrape.yml (the daily cron)
+.github/workflows/  scrape.yml (the hourly cron)
 ```
 
----
+## 🚀 Run it yourself
 
-## Setup runbook
+> Single-user tool. Everything below stays on free tiers.
 
-> Times are **America/New_York (Eastern)**. Everything below stays on free tiers.
+1. **Install:** `npm install` then `cp .env.example .env.local`.
+2. **Supabase:** create a free project; run `supabase/migrations/0001_init.sql` + `0002_search_rpc.sql` + the `sources` block of `supabase/seed.sql` in the SQL Editor.
+3. **API keys:** grab a free Adzuna `app_id` + `app_key` (the other sources need no key). Curate `scraper/companies.yml` with the ATS board tokens you care about.
+4. **Owner + profile:** add a Supabase auth user (any email — you never log in with it), put its UUID in `OWNER_USER_ID`, and run the `skills_profile` seed with that UUID.
+5. **Scraper CI:** push to GitHub, add the Actions secrets (below), and run the `daily-scrape` workflow once to populate data. A **public** repo gets unlimited Actions minutes (secrets stay encrypted).
+6. **Deploy:** import to Vercel, add the env vars (below) including `ACCESS_CODE` + `GATE_SECRET`, deploy. Open the URL, enter your code, done.
+7. **Refresh button** (optional): set `GH_DISPATCH_TOKEN` (a repo-scoped PAT with Actions r/w) + `GH_REPO` in Vercel to enable on-demand scrapes (up to 24/day).
 
-1. **Install + scaffold locally**
-   ```bash
-   npm install
-   cp .env.example .env.local   # fill in as you create resources below
-   ```
+```bash
+npm run dev        # local web app
+npm run build      # production build (full type-check)
+SCRAPE_TRIGGER=dispatch python -m scraper.main   # run the scraper locally
+```
 
-2. **Create a Supabase project** (free, region near US East — e.g. `us-east-1`). Save the DB password; copy the Project URL, `anon` key, and `service_role` key.
-
-3. **Apply the schema** in the Supabase SQL Editor, in order:
-   - `supabase/migrations/0001_init.sql`
-   - `supabase/migrations/0002_search_rpc.sql`
-   Then run the **sources** block of `supabase/seed.sql` (leave the `skills_profile` insert for step 10).
-
-4. **Get free API creds:** an Adzuna `app_id` + `app_key` from <https://developer.adzuna.com>. (The Muse / Remotive / RemoteOK / Greenhouse / Lever / Ashby need no key.)
-
-5. **Build the scraper** — already in `scraper/`. Curate `scraper/companies.yml` (the ATS board tokens) to companies you care about; it ships with known-good public ones so the first run isn't empty.
-
-6. **Push to GitHub** (private repo recommended — keeps `companies.yml` + logs private; the free 2,000 Actions min/mo applies to private repos).
-
-7. **Add GitHub Actions secrets** (Repo → Settings → Secrets and variables → Actions):
-   `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `OWNER_USER_ID`, `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`. Optional: secret `ANTHROPIC_API_KEY` + variable `USE_LLM_RATIONALE=true` (leave unset for the $0 default).
-
-8. **Smoke-test the scraper:** Actions → `daily-scrape` → Run workflow. Confirm `jobs`, `scrape_runs`, and `job_fit` populate and that a dead ATS token logs-and-skips. Fix any source errors before wiring the UI.
-
-9. **Run the app:** `npm run dev` → <http://localhost:3000>. You'll hit the access-code gate; enter `ACCESS_CODE` (default `280902`) to get in.
-
-10. **Create the data-owner user + seed the profile:** the access code is how you log in, but the data still needs an owner uuid that exists in `auth.users` (foreign keys). Supabase → Authentication → **Add user** (any email; you never log in with it), copy its UUID into `OWNER_USER_ID` (Vercel **and** GitHub secrets). In `supabase/seed.sql`, replace the placeholder UUID in the `skills_profile` insert with that UUID and run it (the `default auth.uid()` is NULL in the SQL Editor, so `owner_id` MUST be passed explicitly).
-
-11. **Deploy to Vercel:** import the repo, add the env vars below (including `ACCESS_CODE` + `GATE_SECRET`), deploy, note the prod URL. (`.vercelignore` keeps `scraper/`, `supabase/`, `.github/` out of the build.)
-
-12. **Unlock it:** open the prod URL → the gate appears → enter your `ACCESS_CODE`. No Supabase email/redirect template needed — the code is the only login. (Change the code any time by updating `ACCESS_CODE` and redeploying.)
-
-13. **Wire the Refresh button:** create a fine-grained PAT (`GH_DISPATCH_TOKEN`) scoped to this repo with **Actions: read/write**, set `GH_DISPATCH_TOKEN` + `GH_REPO=you/jobradar` in Vercel, redeploy. Click **Refresh** → a new Action run should trigger and the daily manual-refresh counter (10/day) should tick down.
-
-14. **Confirm the daily cron** lands the next morning in the 05:45–06:55 ET window; the "synced HH:MM ET" strip reflects it, and a guarded/skip day still writes a `scrape_runs` heartbeat (so Supabase never auto-pauses).
-
-15. *(Optional, NOT $0)* set `ANTHROPIC_API_KEY` + `USE_LLM_RATIONALE=true` for nicer Claude-Haiku rationales on the top ~15 jobs/day (~$0.42/mo).
-
----
-
-## Environment variables
+### Environment variables
 
 | Where | Vars |
 |---|---|
-| **Vercel Project Env** | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (server-only), `ACCESS_CODE`, `GATE_SECRET`, `OWNER_USER_ID`, `GH_DISPATCH_TOKEN`, `GH_REPO`, `NEXT_PUBLIC_PORTFOLIO_URL` |
-| **GitHub Actions secrets** | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `OWNER_USER_ID`, `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`, *(opt)* `ANTHROPIC_API_KEY` + var `USE_LLM_RATIONALE` |
+| **Vercel** | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `ACCESS_CODE`, `GATE_SECRET`, `OWNER_USER_ID`, `GH_DISPATCH_TOKEN`, `GH_REPO`, `NEXT_PUBLIC_PORTFOLIO_URL` |
+| **GitHub Actions** | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `OWNER_USER_ID`, `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` |
 
-`SUPABASE_SERVICE_ROLE_KEY` is server-only — never `NEXT_PUBLIC_`-prefixed, never imported into a client component.
+`SUPABASE_SERVICE_ROLE_KEY` is server-only — never `NEXT_PUBLIC_`-prefixed.
 
----
+## 🧩 Notable engineering decisions
 
-## Commands
-
-```bash
-npm run dev         # local dev server
-npm run build       # production build (also a full type-check)
-npm run typecheck   # tsc --noEmit
-```
-
-Scraper (from repo root, with the GitHub-Actions env vars set locally):
-```bash
-pip install -r scraper/requirements.txt
-SCRAPE_TRIGGER=dispatch python -m scraper.main   # 'dispatch' skips the time-guard
-```
+- **All heavy compute is offloaded to CI.** Vercel functions can't load a transformer within their duration cap, so embedding + scoring run in the GitHub Action and the web app only reads precomputed rows — keeping requests fast and free.
+- **Fit-sorted pagination needs a join,** so `GET /api/jobs` is backed by a single `search_jobs` Postgres function that joins jobs↔fit↔saved↔application for the owner, applies every filter, sorts, paginates, and returns a window count — running under the caller's RLS.
+- **Hourly without rate-limit pain:** a `run_courtesy` gate runs the tolerant ATS boards every hour but throttles the courtesy endpoints (and Adzuna's monthly-capped API) to 4×/day.
+- **Robust ingestion:** entity-escaped HTML is unescaped before stripping, salaries are normalized to annual USD, a heuristic US-only filter handles edge cases (e.g. `"Toronto, ON, CA"` ≠ California), and a dedupe hash collapses cross-source duplicates.
 
 ---
 
-## Implementation notes / intentional deviations from the spec
-
-- **Feed lives at `/`** (inside the `(app)` route group) rather than a separate `app/page.tsx` redirect — Next route groups don't change the URL, so a root `page.tsx` + `(app)/page.tsx` would both resolve to `/` and conflict. Unauthenticated users hitting `/` are redirected to `/login` by middleware + the `(app)` layout guard.
-- **`GET /api/jobs` is backed by the `search_jobs` Postgres function** (`0002_search_rpc.sql`) because sort-by-fit needs the jobs↔job_fit join at the DB layer. It returns each row as the client `JobWithFit` shape plus a window `total`, and runs with the caller's RLS (not `security definer`).
-- **Server-action twins were folded into the API routes** — the UI mutates via `fetch` to `/api/*`, so a parallel `app/actions/*` layer would be dead code.
-- **`embedding` / `raw` columns are never sent to the client** (stripped in the RPC and via `JOB_PUBLIC_COLUMNS`).
-
-## Do NOT
-
-- No LinkedIn/Indeed (or any anti-bot/ToS-protected) HTML scraping — aggregator APIs + public ATS JSON only.
-- No paid call on a critical path — the LLM rationale stays OFF by default.
-- No scraping/embedding/fit-scoring in Vercel functions, and no Vercel Cron for the scrape — heavy work lives in GitHub Actions.
-- No public exposure of saved/tracker/fit/resume data — single owner only. The server-side access-code gate (signed http-only cookie) is the boundary; data is only served when a valid gate cookie is present, and the code is never shipped to the browser.
-- No `SUPABASE_SERVICE_ROLE_KEY` in the browser; never `NEXT_PUBLIC_`-prefix it.
+<div align="center">
+<sub>Personal project · built to make an early-career AI/ML job hunt less of a slog.</sub>
+</div>
