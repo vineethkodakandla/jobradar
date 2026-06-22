@@ -2,7 +2,7 @@ import { requireOwner } from "@/lib/auth-helpers";
 import { startOfEasternDayUTC } from "@/lib/time";
 import type { RefreshResponse } from "@/lib/types";
 
-const MAX_MANUAL_PER_DAY = 10;
+const MAX_MANUAL_PER_DAY = 24;
 const MIN_GAP_MS = 60_000;
 
 /**
@@ -35,7 +35,7 @@ export async function POST() {
   const count = todays?.length ?? 0;
   if (count >= MAX_MANUAL_PER_DAY) {
     return Response.json(
-      { ok: false, remaining_today: 0, message: "Daily manual-refresh limit reached (10/day)." } satisfies RefreshResponse,
+      { ok: false, remaining_today: 0, message: "Daily manual-refresh limit reached (24/day)." } satisfies RefreshResponse,
       { status: 429 },
     );
   }

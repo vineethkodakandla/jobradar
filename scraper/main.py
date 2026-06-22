@@ -73,6 +73,10 @@ log = logging.getLogger("jobradar.main")
 EASTERN = ZoneInfo("America/New_York")
 WINDOW_START = dtime(5, 45)
 WINDOW_END = dtime(6, 55)
+# We now scrape several times a day on a fixed interval (cron), so there is no
+# daily time-of-day window. This dedup only stops a duplicate cron fire from
+# re-running within the interval; manual/dispatch triggers always run.
+RECENT_SUCCESS_MINUTES = 120
 COMPANIES_YML = os.path.join(os.path.dirname(os.path.abspath(__file__)), "companies.yml")
 
 # ATS boards (greenhouse/lever/ashby) return EVERY role at a company (sales,
@@ -165,14 +169,27 @@ def load_company_tokens() -> dict[str, list[str]]:
     }
 
 
-def build_sources(env: Env, tokens: dict[str, list[str]]) -> tuple[list[Any], Optional[AdzunaSource]]:
+# Adzuna allows 2,500 API calls/MONTH. Since we now scrape several times a day,
+# cap per-run usage and stop calling Adzuna once the month's budget is spent.
+ADZUNA_PER_RUN = 20
+ADZUNA_MONTHLY_CAP = 2400
+
+
+def build_sources(
+    env: Env, tokens: dict[str, list[str]], adzuna_budget: int
+) -> tuple[list[Any], Optional[AdzunaSource]]:
     """Instantiate the enabled sources. Returns (sources, adzuna_or_None)."""
     sources: list[Any] = []
     adzuna: Optional[AdzunaSource] = None
 
     if env.adzuna_app_id and env.adzuna_app_key:
-        adzuna = AdzunaSource(env.adzuna_app_id, env.adzuna_app_key)
-        sources.append(adzuna)
+        if adzuna_budget > 0:
+            adzuna = AdzunaSource(
+                env.adzuna_app_id, env.adzuna_app_key, call_budget=adzuna_budget
+            )
+            sources.append(adzuna)
+        else:
+            log.warning("Adzuna monthly budget spent — skipping Adzuna this run.")
     else:
         log.warning("Adzuna keys missing — skipping Adzuna source (run continues).")
 
@@ -204,7 +221,13 @@ def run_scrape(client, env: Env, run_started_at: datetime) -> RunState:
     state = RunState()
     source_map = db.load_source_map(client)
     tokens = load_company_tokens()
-    sources, adzuna = build_sources(env, tokens)
+    adzuna_used = 0
+    try:
+        adzuna_used = db.adzuna_calls_this_month(client)
+    except Exception as exc:
+        log.warning("Could not read monthly Adzuna usage (%s) — assuming 0.", exc)
+    adzuna_budget = max(0, min(ADZUNA_PER_RUN, ADZUNA_MONTHLY_CAP - adzuna_used))
+    sources, adzuna = build_sources(env, tokens, adzuna_budget)
 
     all_normalized: list[dict[str, Any]] = []
 
@@ -227,6 +250,11 @@ def run_scrape(client, env: Env, run_started_at: datetime) -> RunState:
                 nj = normalize.normalize_job(rj)
                 if nj is not None:
                     normalized.append(nj)
+            # USA-only (all sources): drop clearly non-US postings.
+            us_before = len(normalized)
+            normalized = [nj for nj in normalized if normalize.is_us_job(nj)]
+            if len(normalized) != us_before:
+                log.info("Source %r: US filter %d -> %d.", slug, us_before, len(normalized))
             # ATS boards list every role at a company — keep only tech titles.
             if slug in _ATS_SLUGS:
                 before = len(normalized)
@@ -452,28 +480,21 @@ def main() -> int:
     env = Env.load()
     client = db.make_client(env.supabase_url, env.supabase_key)
 
-    now_eastern = datetime.now(EASTERN)
     is_manual = env.trigger in ("manual", "dispatch")
 
     # --- guard decision (heartbeat is written regardless) ---
+    # Cron runs every interval; manual/dispatch always runs. The only skip is a
+    # safety dedup: if a 'success' run finished very recently, a near-simultaneous
+    # cron fire is a no-op (it still writes a keep-alive heartbeat).
     should_skip = False
     skip_reason = ""
-
-    if not is_manual and not in_scrape_window(now_eastern):
-        should_skip = True
-        skip_reason = (
-            f"outside scrape window (ET {now_eastern.time().strftime('%H:%M')} "
-            f"not in {WINDOW_START}-{WINDOW_END})"
-        )
-
-    if not should_skip:
+    if not is_manual:
         try:
-            day_start = eastern_day_start_utc(now_eastern)
-            if not is_manual and db.success_run_exists_today(client, day_start):
+            if db.recent_success_within(client, minutes=RECENT_SUCCESS_MINUTES):
                 should_skip = True
-                skip_reason = "a 'success' run already exists for today (ET)"
+                skip_reason = f"a 'success' run finished < {RECENT_SUCCESS_MINUTES} min ago"
         except Exception as exc:
-            log.warning("Could not check today's runs (%s) — proceeding.", exc)
+            log.warning("Could not check recent runs (%s) — proceeding.", exc)
 
     if should_skip:
         # MANDATORY keep-alive: still write a heartbeat row (status='skipped').

@@ -109,6 +109,70 @@ _US_COUNTRY_TOKENS = {
     "america",
 }
 
+# Whole-word tokens that mark a posting as NOT in the US (countries / regions /
+# major non-US cities). Used by ``is_us_job``. A present US state overrides this
+# (handles "London, KY" etc.). Kept broad but conservative to avoid dropping US
+# jobs (e.g. "indiana" is safe — \bindia\b won't match inside it).
+_NON_US_TOKENS = {
+    # countries / regions
+    "canada", "united kingdom", "uk", "england", "scotland", "wales", "ireland",
+    "france", "germany", "deutschland", "spain", "italy", "netherlands",
+    "switzerland", "sweden", "norway", "denmark", "finland", "poland",
+    "portugal", "austria", "belgium", "czechia", "czech republic", "romania",
+    "greece", "india", "singapore", "japan", "china", "hong kong", "taiwan",
+    "korea", "australia", "new zealand", "brazil", "argentina", "mexico",
+    "colombia", "chile", "peru", "israel", "turkey", "egypt", "south africa",
+    "nigeria", "kenya", "uae", "united arab emirates", "qatar", "saudi arabia",
+    "emea", "apac", "latam", "europe", "european union", "asia", "africa",
+    "philippines", "indonesia", "vietnam", "thailand", "malaysia", "pakistan",
+    "bangladesh", "ukraine", "lithuania", "estonia", "latvia", "hungary",
+    "bulgaria", "serbia", "croatia", "slovakia", "slovenia", "luxembourg",
+    "iceland", "cyprus", "malta", "ontario", "quebec", "british columbia",
+    "alberta", "manitoba", "nova scotia",
+    # major non-US cities
+    "toronto", "montreal", "vancouver", "ottawa", "calgary", "edmonton",
+    "london", "manchester", "edinburgh", "paris", "lyon", "berlin", "munich",
+    "hamburg", "frankfurt", "cologne", "amsterdam", "rotterdam", "dublin",
+    "madrid", "barcelona", "valencia", "lisbon", "porto", "zurich", "geneva",
+    "stockholm", "oslo", "copenhagen", "helsinki", "warsaw", "krakow", "prague",
+    "vienna", "brussels", "milan", "rome", "athens", "bucharest", "budapest",
+    "bangalore", "bengaluru", "hyderabad", "mumbai", "delhi", "pune", "chennai",
+    "kolkata", "gurgaon", "gurugram", "noida", "tokyo", "osaka", "kyoto",
+    "beijing", "shanghai", "shenzhen", "guangzhou", "seoul", "sydney",
+    "melbourne", "brisbane", "perth", "auckland", "wellington", "sao paulo",
+    "rio de janeiro", "buenos aires", "santiago", "bogota", "lima",
+    "mexico city", "guadalajara", "tel aviv", "jerusalem", "dubai", "abu dhabi",
+    "doha", "riyadh", "cairo", "lagos", "nairobi", "cape town", "johannesburg",
+    "istanbul", "bangkok", "jakarta", "manila", "kuala lumpur", "ho chi minh",
+}
+
+
+def is_us_job(nj: dict[str, Any]) -> bool:
+    """Heuristic US-only filter (spec: owner wants USA jobs only).
+
+    A present US state => US; an explicit non-US country or a non-US token in the
+    location => non-US; otherwise assume US (a bare "Remote" or unrecognized city
+    is kept). Tokens are matched as whole words so US look-alikes survive
+    (e.g. "Indiana" is not matched by "india").
+    """
+    state = (nj.get("state") or "").upper()
+    if state in _STATE_ABBRS:
+        return True
+    country = (nj.get("country") or "").upper()
+    if country and country not in (
+        "US", "USA", "UNITED STATES", "UNITED STATES OF AMERICA", "AMERICA",
+    ):
+        return False
+    blob = " ".join(
+        x for x in (nj.get("location_raw"), nj.get("city"), nj.get("country")) if x
+    ).lower()
+    if not blob:
+        return True
+    for tok in _NON_US_TOKENS:
+        if re.search(r"\b" + re.escape(tok) + r"\b", blob):
+            return False
+    return True
+
 
 # --- HTML stripping ----------------------------------------------------------
 
@@ -151,6 +215,12 @@ def strip_html(value: Optional[str]) -> str:
     """HTML -> tidy plain text. Safe on already-plain or ``None`` input."""
     if not value:
         return ""
+    # Some sources (notably Greenhouse `content`) return HTML that is itself
+    # entity-escaped — e.g. "&lt;div&gt;&lt;p&gt;...". Unescape that FIRST so the
+    # parser sees real tags; otherwise convert_charrefs turns "&lt;" into a
+    # literal "<" inside the text and the tags survive as visible characters.
+    if "&lt;" in value or "&gt;" in value:
+        value = unescape(value)
     if "<" not in value and "&" not in value:
         cleaned = value
     else:
@@ -560,8 +630,9 @@ def normalize_job(raw_job: RawJob) -> Optional[dict[str, Any]]:
         log.debug("skip unusable raw job (title/url missing) from %s", raw_job.source_slug)
         return None
 
-    description = cap_text(strip_html(raw_job.description) if raw_job.description_is_html
-                           else (raw_job.description or "").strip())
+    # Always run the HTML stripper — it is a no-op on already-plain text and
+    # protects against sources that mislabel description_is_html.
+    description = cap_text(strip_html(raw_job.description))
 
     city, state, country, loc_remote = parse_location(
         raw_job.location_raw, raw_job.city, raw_job.state, raw_job.country

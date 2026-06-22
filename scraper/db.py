@@ -14,7 +14,7 @@ pgvector values are sent as the string literal '[v1,v2,...]' (see fit.py
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from supabase import Client, create_client
@@ -129,6 +129,37 @@ def success_run_exists_today(client: Client, day_start_utc: datetime) -> bool:
         .execute()
     )
     return bool(resp.data)
+
+
+def recent_success_within(client: Client, minutes: int) -> bool:
+    """True if a 'success' run finished within the last ``minutes`` (dedup guard
+    for the multi-times-a-day cron)."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
+    resp = (
+        client.table("scrape_runs")
+        .select("id")
+        .eq("status", "success")
+        .gte("finished_at", cutoff)
+        .limit(1)
+        .execute()
+    )
+    return bool(resp.data)
+
+
+def adzuna_calls_this_month(client: Client) -> int:
+    """Sum of ``adzuna_calls`` across this calendar month's runs (UTC).
+
+    Enforces Adzuna's 2,500 calls/MONTH cap across the now-frequent runs.
+    """
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    resp = (
+        client.table("scrape_runs")
+        .select("adzuna_calls")
+        .gte("started_at", month_start.isoformat())
+        .execute()
+    )
+    return sum((r.get("adzuna_calls") or 0) for r in (resp.data or []))
 
 
 # --- jobs upsert -------------------------------------------------------------
