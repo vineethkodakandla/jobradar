@@ -155,6 +155,17 @@ def is_us_job(nj: dict[str, Any]) -> bool:
     is kept). Tokens are matched as whole words so US look-alikes survive
     (e.g. "Indiana" is not matched by "india").
     """
+    blob = " ".join(
+        x for x in (nj.get("location_raw"), nj.get("city"), nj.get("country")) if x
+    ).lower()
+    # Canada is the main false positive: "City, ON, CA" mis-parses the "CA"
+    # country code as California, so check Canadian provinces / "canada" BEFORE
+    # the US-state shortcut. (No US state collides with a province abbreviation.)
+    if blob and (
+        re.search(r"\bcanada\b", blob)
+        or re.search(r",\s*(?:on|qc|bc|ab|mb|sk|ns|nb|nl|pe|nt|yt|nu)\b", blob)
+    ):
+        return False
     state = (nj.get("state") or "").upper()
     if state in _STATE_ABBRS:
         return True
@@ -163,9 +174,6 @@ def is_us_job(nj: dict[str, Any]) -> bool:
         "US", "USA", "UNITED STATES", "UNITED STATES OF AMERICA", "AMERICA",
     ):
         return False
-    blob = " ".join(
-        x for x in (nj.get("location_raw"), nj.get("city"), nj.get("country")) if x
-    ).lower()
     if not blob:
         return True
     for tok in _NON_US_TOKENS:
