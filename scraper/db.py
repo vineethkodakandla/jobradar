@@ -200,13 +200,13 @@ def deactivate_stale_jobs(
         return 0
     resp = (
         client.table("jobs")
-        .update({"is_active": False})
+        .update({"is_active": False}, count="exact", returning="minimal")
         .in_("source_id", succeeded_source_ids)
         .lt("last_seen_at", run_started_at.isoformat())
         .eq("is_active", True)
         .execute()
     )
-    n = len(resp.data or [])
+    n = resp.count or 0
     log.info("Deactivated %d stale jobs.", n)
     return n
 
@@ -217,12 +217,12 @@ def purge_old_inactive_jobs(client: Client, older_than_days: int = 30) -> int:
     cutoff_iso = datetime.fromtimestamp(cutoff, tz=timezone.utc).isoformat()
     resp = (
         client.table("jobs")
-        .delete()
+        .delete(count="exact", returning="minimal")
         .eq("is_active", False)
         .lt("last_seen_at", cutoff_iso)
         .execute()
     )
-    n = len(resp.data or [])
+    n = resp.count or 0
     if n:
         log.info("Hard-deleted %d jobs inactive > %d days.", n, older_than_days)
     return n
