@@ -1,12 +1,13 @@
 """JobRadar scraper orchestrator.
 
-Runs once daily from GitHub Actions. Responsibilities (spec §6):
+Runs HOURLY from GitHub Actions (cron is irregular/best-effort). Responsibilities:
   1. Write a ``scrape_runs`` heartbeat row FIRST (keep-alive — anti-pause).
-  2. DST guard: only do real work in the 05:45–06:55 America/New_York window
-     (manual/dispatch triggers skip the window). Also skip the body if a
-     'success' run already exists for today (ET).
+  2. Dedup guard only: skip the body if a 'success' run finished < RECENT_SUCCESS
+     _MINUTES ago (manual/dispatch always run). The rate-sensitive sources
+     (Adzuna/Remotive/RemoteOK) additionally run only every COURTESY_INTERVAL
+     _HOURS of elapsed time; the ATS boards + The Muse run every scrape.
   3. Per-source fetch -> normalize -> upsert, with source failures isolated and
-     the Adzuna call budget enforced (<=80/run, recorded in adzuna_calls).
+     the Adzuna call budget enforced (per-run + monthly, recorded in adzuna_calls).
   4. Deactivate stale rows for SUCCEEDED sources only.
   5. Fit: embed profile (if changed/missing) + new/changed jobs, score, upsert
      job_fit. If the profile changed, re-score ALL active jobs via stored
@@ -173,8 +174,9 @@ def load_company_tokens() -> dict[str, list[str]]:
 # usage AND only run the rate-sensitive sources every COURTESY_INTERVAL_HOURS.
 ADZUNA_PER_RUN = 20
 ADZUNA_MONTHLY_CAP = 2400
-# Rate-sensitive sources (Adzuna/Remotive/RemoteOK) run only when the UTC hour is
-# a multiple of this — i.e. 4x/day at 00/06/12/18 UTC — not on every hourly run.
+# Rate-sensitive sources (Adzuna/Remotive/RemoteOK) run at most once per this many
+# hours of ELAPSED TIME (~4x/day) — keeps Adzuna under its monthly cap and avoids
+# 403s from courtesy endpoints, regardless of how irregular GitHub's cron is.
 COURTESY_INTERVAL_HOURS = 6
 
 
@@ -523,9 +525,22 @@ def main() -> int:
 
     # --- real run ---
     run_started_at = datetime.now(timezone.utc)
-    # Rate-sensitive sources run only every COURTESY_INTERVAL_HOURS (or always on
-    # a manual trigger); the ATS boards + Muse run on every hourly scrape.
-    run_courtesy = is_manual or (run_started_at.hour % COURTESY_INTERVAL_HOURS == 0)
+    # Rate-sensitive sources (Adzuna/Remotive/RemoteOK) run only after
+    # COURTESY_INTERVAL_HOURS of ELAPSED TIME since they last ran (or always on a
+    # manual trigger); the ATS boards + Muse run on every scrape. Time-based, not
+    # UTC-hour-keyed, so GitHub's irregular cron can't strand them forever.
+    if is_manual:
+        run_courtesy = True
+    else:
+        try:
+            run_courtesy = (
+                db.hours_since_last_courtesy(client) >= COURTESY_INTERVAL_HOURS
+            )
+        except Exception as exc:
+            log.warning("Courtesy check failed (%s) — including courtesy sources.", exc)
+            run_courtesy = True
+    log.info("run_courtesy=%s (rate-sensitive sources %s this run)",
+             run_courtesy, "INCLUDED" if run_courtesy else "throttled")
     run_id = db.start_run(client, trigger=env.trigger, status="running")
 
     try:

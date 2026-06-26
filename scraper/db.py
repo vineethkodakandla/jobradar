@@ -146,6 +146,42 @@ def recent_success_within(client: Client, minutes: int) -> bool:
     return bool(resp.data)
 
 
+def hours_since_last_courtesy(client: Client) -> float:
+    """Hours since the most recent run that exercised a rate-sensitive source
+    (Adzuna / Remotive / RemoteOK).
+
+    The courtesy gate keys on ELAPSED TIME, not a fixed UTC hour, because
+    GitHub's scheduled cron fires at irregular times (often only every 2-3h, at
+    arbitrary minutes) — an ``hour % 6 == 0`` gate would skip these sources
+    forever. Returns a large number when no such run exists yet, so the next run
+    includes them.
+    """
+    resp = (
+        client.table("scrape_runs")
+        .select("started_at,per_source,adzuna_calls")
+        .order("started_at", desc=True)
+        .limit(60)
+        .execute()
+    )
+    for row in resp.data or []:
+        ps = row.get("per_source") or {}
+        used = ((row.get("adzuna_calls") or 0) > 0) or (
+            isinstance(ps, dict)
+            and any(k in ps for k in ("adzuna", "remotive", "remoteok"))
+        )
+        if not used:
+            continue
+        started = row.get("started_at")
+        if not started:
+            continue
+        try:
+            dt = datetime.fromisoformat(started.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        return (datetime.now(timezone.utc) - dt).total_seconds() / 3600.0
+    return 999.0
+
+
 def adzuna_calls_this_month(client: Client) -> int:
     """Sum of ``adzuna_calls`` across this calendar month's runs (UTC).
 

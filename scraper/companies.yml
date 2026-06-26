@@ -1,77 +1,199 @@
 # =============================================================================
-# JobRadar — curated ATS board tokens / handles.
+# JobRadar — ATS board tokens / handles (VALIDATED against the live public APIs).
 #
 # This list IS your ATS coverage (ATS boards are per-company, not searchable).
-# Keyed by ATS kind; each value is a list of the board token/handle that appears
-# in that ATS's public URL:
-#
 #   greenhouse -> https://boards-api.greenhouse.io/v1/boards/<TOKEN>/jobs
 #   lever      -> https://api.lever.co/v0/postings/<HANDLE>?mode=json
 #   ashby      -> https://api.ashbyhq.com/posting-api/job-board/<BOARD>?includeCompensation=true
 #
-# HOW TO ADD MORE:
-#   1. Open a company's careers page, open DevTools -> Network, reload.
-#   2. Find the XHR to boards-api.greenhouse.io / api.lever.co / api.ashbyhq.com.
-#   3. Copy the <TOKEN>/<HANDLE>/<BOARD> segment from that URL and add it below.
-#   4. A dead/renamed token just logs a warning and is skipped — it never fails
-#      the run — so a stale entry is harmless (but prune them occasionally).
-#
-# Seeded with well-known PUBLIC boards so the first smoke test isn't empty.
-# Token availability/shape can change without notice; treat ATS as best-effort.
+# Every token below returned >0 live jobs when validated. A dead/renamed token
+# just logs a warning and is skipped at runtime. Re-validate periodically.
 # =============================================================================
 
 greenhouse:
-  - stripe
-  - databricks
-  - airbnb
-  - dropbox
-  - robinhood
-  - cloudflare
-  - coinbase
-  - gitlab
-  - benchling
-  - lyft
-  - doordash
-  - instacart
+  - abnormalsecurity
   - affirm
-  - brex
-  - retool
-  - mixpanel
+  - airbnb
+  - airtable
+  - alpaca
+  - amplitude
+  - anthropic
   - asana
-  - samsara
-  - sourcegraph
-  - twilio
-  - hashicorp
+  - assemblyai
+  - betterment
+  - block
+  - brex
+  - cameo
+  - carta
+  - chainguard
+  - chime
+  - clickhouse
+  - cloudflare
+  - cockroachlabs
+  - coinbase
+  - comet
+  - coreweave
+  - coursera
+  - cresta
+  - cribl
+  - cultureamp
+  - databricks
+  - datadog
   - discord
-  - reddit
-  - pinterest
+  - dremio
+  - dropbox
+  - duolingo
+  - epicgames
+  - faire
+  - fastly
+  - figma
+  - fivetran
   - flexport
+  - fourkites
+  - gitlab
+  - gusto
+  - hightouch
+  - honeycomb
+  - huntress
+  - instacart
+  - justworks
+  - kodiak
+  - lattice
+  - launchdarkly
+  - lithic
+  - lyft
+  - marqeta
+  - mavenclinic
+  - mercury
+  - mixpanel
+  - netlify
+  - nextdoor
+  - nuro
+  - okta
+  - pinterest
+  - planetscale
+  - postman
+  - project44
+  - public
+  - reddit
+  - remotecom
+  - riotgames
+  - robinhood
+  - roblox
+  - runpod
+  - salesloft
+  - samsara
+  - scaleai
+  - sigmacomputing
+  - sofi
+  - speechmatics
+  - starburst
+  - stripe
+  - tailscale
+  - tanium
+  - tenstorrent
+  - toast
+  - truveta
+  - twilio
+  - twitch
+  - vercel
+  - verkada
+  - waymo
+  - webflow
+  - workato
+  - yugabyte
 
 lever:
-  - palantir
-  - plaid
-  - netflix
-  - spotify
-  - ramp
-  - voleon
+  - gopuff
+  - lyrahealth
   - mistral
-  - leverdemo
-  - matchgroup
-  - kong
+  - neon
+  - outreach
+  - palantir
+  - secureframe
+  - shieldai
+  - spotify
+  - wealthfront
+  - zilliz
+  - zoox
 
 ashby:
-  - openai
-  - ramp
-  - notion
-  - linear
-  - vanta
-  - mercury
-  - runwayml
-  - hex
-  - clay
-  - cohere
-  - posthog
-  - replit
-  - tome
-  - modal
+  - 1password
+  - abridge
+  - airbyte
+  - angi
+  - anyscale
+  - astronomer
+  - atlan
   - baseten
+  - benchling
+  - cedar
+  - cerebras
+  - character
+  - clickup
+  - cohere
+  - column
+  - commure
+  - confluent
+  - crusoe
+  - cursor
+  - datafold
+  - deel
+  - deepgram
+  - deepnote
+  - distyl
+  - drata
+  - elevenlabs
+  - etched
+  - harvey
+  - headway
+  - inngest
+  - knock
+  - kong
+  - langchain
+  - langfuse
+  - linear
+  - llamaindex
+  - materialize
+  - mintlify
+  - miro
+  - modal
+  - moderntreasury
+  - montecarlodata
+  - nomic
+  - notion
+  - nubank
+  - openai
+  - patreon
+  - perplexity
+  - pinecone
+  - plaid
+  - posthog
+  - prefect
+  - railway
+  - ramp
+  - render
+  - replit
+  - resend
+  - semgrep
+  - sentry
+  - sierra
+  - skydio
+  - statsig
+  - substack
+  - suno
+  - supabase
+  - synthesia
+  - temporal
+  - thumbtack
+  - titan
+  - unit
+  - unstructured
+  - vanta
+  - vastai
+  - vellum
+  - voleon
+  - weaviate
+  - writer
+  - zapier
+  - zip

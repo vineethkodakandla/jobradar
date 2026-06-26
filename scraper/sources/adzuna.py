@@ -28,16 +28,20 @@ log = logging.getLogger("jobradar.sources.adzuna")
 API_BASE = "https://api.adzuna.com/v1/api/jobs/us/search"
 RESULTS_PER_PAGE = 50          # Adzuna max
 MAX_PAGES_PER_QUERY = 3        # <=150 results/query (spec §4)
-MAX_DAYS_OLD = 2
+MAX_DAYS_OLD = 3               # fresh, but wide enough for steady new-job volume
 PAGE_STOP_THRESHOLD = 50       # stop a query when a page returns < 50 results
 DEFAULT_CALL_BUDGET = 80       # <=80 calls/run (~2400/month)
 TIMEOUT = 20
 
-# what_or batches covering the owner's target roles (SWE/ML/AI/FDE).
+# what_or batches covering the owner's target roles + adjacent ones. ~5 batches
+# x <=3 pages = <=15 calls/run; at ~4 courtesy runs/day that's ~1,800/month,
+# under Adzuna's 2,500/month free cap (also enforced in main.py).
 QUERY_BATCHES = [
     "software engineer machine learning engineer",
     "ai engineer artificial intelligence forward deployed engineer",
     "ml engineer llm generative ai applied scientist",
+    "data engineer data scientist python developer",
+    "backend engineer full stack engineer software developer",
 ]
 
 
