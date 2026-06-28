@@ -51,6 +51,7 @@ if __package__ in (None, ""):
     from scraper.sources.ats.greenhouse import GreenhouseSource  # type: ignore
     from scraper.sources.ats.lever import LeverSource  # type: ignore
     from scraper.sources.ats.ashby import AshbySource  # type: ignore
+    from scraper.sources.ats.smartrecruiters import SmartRecruitersSource  # type: ignore
     from scraper.fit import Profile  # type: ignore
 else:
     from . import db, fit, normalize
@@ -61,6 +62,7 @@ else:
     from .sources.ats.greenhouse import GreenhouseSource
     from .sources.ats.lever import LeverSource
     from .sources.ats.ashby import AshbySource
+    from .sources.ats.smartrecruiters import SmartRecruitersSource
     from .fit import Profile
 
 import yaml
@@ -84,7 +86,7 @@ COMPANIES_YML = os.path.join(os.path.dirname(os.path.abspath(__file__)), "compan
 # marketing, ops, ...). The owner only wants tech roles, so filter ATS titles to
 # engineering / ML / AI / data / SWE / FDE. Aggregators are already query-scoped
 # to these roles, so they are left unfiltered.
-_ATS_SLUGS = {"greenhouse", "lever", "ashby"}
+_ATS_SLUGS = {"greenhouse", "lever", "ashby", "smartrecruiters"}
 _TECH_TITLE_RE = re.compile(
     r"(engineer|engineering|developer|software|\bswe\b|\bsde\b|programmer|"
     r"architect|machine learning|\bml\b|artificial intelligence|\bai\b|"
@@ -162,11 +164,12 @@ def load_company_tokens() -> dict[str, list[str]]:
             data = yaml.safe_load(fh) or {}
     except (OSError, yaml.YAMLError) as exc:
         log.warning("Could not read companies.yml (%s) — ATS sources empty.", exc)
-        return {"greenhouse": [], "lever": [], "ashby": []}
+        return {"greenhouse": [], "lever": [], "ashby": [], "smartrecruiters": []}
     return {
         "greenhouse": list(data.get("greenhouse") or []),
         "lever": list(data.get("lever") or []),
         "ashby": list(data.get("ashby") or []),
+        "smartrecruiters": list(data.get("smartrecruiters") or []),
     }
 
 
@@ -214,6 +217,7 @@ def build_sources(
     sources.append(GreenhouseSource(tokens.get("greenhouse", [])))  # ATS — every run
     sources.append(LeverSource(tokens.get("lever", [])))            # ATS — every run
     sources.append(AshbySource(tokens.get("ashby", [])))           # ATS — every run
+    sources.append(SmartRecruitersSource(tokens.get("smartrecruiters", [])))  # ATS — every run
     return sources, adzuna
 
 

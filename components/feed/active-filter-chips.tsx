@@ -19,6 +19,18 @@ function sinceLabel(since: string): string {
   return DATE_POSTED_OPTIONS.find((d) => d.value === since)?.label ?? since;
 }
 
+const STATUS_LABELS: Record<string, string> = {
+  none: "Not tracked",
+  saved: "Saved",
+  applied: "Applied",
+  phone_screen: "Phone screen",
+  interview: "Interview",
+  offer: "Offer",
+  rejected: "Rejected",
+  withdrawn: "Withdrawn",
+  ghosted: "Ghosted",
+};
+
 /** Renders one removable chip per active filter, plus a "Clear all" button. */
 export function ActiveFilterChips({ controller }: ActiveFilterChipsProps) {
   const { filters: f, set, reset } = controller;
@@ -77,6 +89,35 @@ export function ActiveFilterChips({ controller }: ActiveFilterChipsProps) {
       {f.since !== "any" && (
         <Chip onRemove={() => set({ since: "any" })}>{sinceLabel(f.since)}</Chip>
       )}
+      {f.company && (
+        <Chip onRemove={() => set({ company: "" })}>@ {f.company}</Chip>
+      )}
+      {f.fitBand.map((b) => (
+        <Chip
+          key={`band-${b}`}
+          onRemove={() => set({ fitBand: f.fitBand.filter((v) => v !== b) })}
+        >
+          {b} fit
+        </Chip>
+      ))}
+      {f.status.map((st) => (
+        <Chip
+          key={`status-${st}`}
+          onRemove={() => set({ status: f.status.filter((v) => v !== st) })}
+        >
+          {STATUS_LABELS[st] ?? st}
+        </Chip>
+      ))}
+      {f.excludeKw.map((kw) => (
+        <Chip
+          key={`ex-${kw}`}
+          onRemove={() =>
+            set({ excludeKw: f.excludeKw.filter((v) => v !== kw) })
+          }
+        >
+          − {kw}
+        </Chip>
+      ))}
 
       <button
         type="button"

@@ -2,9 +2,11 @@
 # JobRadar — ATS board tokens / handles (VALIDATED against the live public APIs).
 #
 # This list IS your ATS coverage (ATS boards are per-company, not searchable).
-#   greenhouse -> https://boards-api.greenhouse.io/v1/boards/<TOKEN>/jobs
-#   lever      -> https://api.lever.co/v0/postings/<HANDLE>?mode=json
-#   ashby      -> https://api.ashbyhq.com/posting-api/job-board/<BOARD>?includeCompensation=true
+#   greenhouse     -> https://boards-api.greenhouse.io/v1/boards/<TOKEN>/jobs
+#   lever          -> https://api.lever.co/v0/postings/<HANDLE>?mode=json
+#   ashby          -> https://api.ashbyhq.com/posting-api/job-board/<BOARD>?includeCompensation=true
+#   smartrecruiters-> https://api.smartrecruiters.com/v1/companies/<TOKEN>/postings?country=us
+#                     (tokens are CASE-SENSITIVE; descriptions live in the per-id DETAIL call)
 #
 # Every token below returned >0 live jobs when validated. A dead/renamed token
 # just logs a warning and is skipped at runtime. Re-validate periodically.
@@ -197,3 +199,35 @@ ashby:
   - writer
   - zapier
   - zip
+
+# SmartRecruiters tokens are CASE-SENSITIVE (the company's exact identifier, e.g.
+# "ServiceNow", "BoschGroup", "NBCUniversal3"). Each token below returned >0 live
+# US jobs when validated against
+#   /v1/companies/<TOKEN>/postings?country=us&limit=1   (HTTP 200 + totalFound>0).
+# A dead/renamed token returns HTTP 200 with totalFound=0 -> warns + is skipped.
+smartrecruiters:
+  - ServiceNow
+  - Visa
+  - BoschGroup
+  - Continental
+  - Wabtec
+  - Experian
+  - NielsenIQ
+  - Wise
+  - AbbVie
+  - Intuitive
+  - AristaNetworks
+  - Xplor
+  - Endava
+  - EvolutionIQ
+  - PatternAI
+  - Socotec
+  - NBCUniversal3
+  - Versant3
+  - JobsForHumanity
+  - ASKStaffing1
+  - WesternDigital
+  - Eurofins
+  - SGS
+  - SOSi1
+  - Mphasis1

@@ -1,4 +1,7 @@
-import type { ExperienceLevel, WorkType } from "./types";
+import type { AppStatus, ExperienceLevel, FitBand, WorkType } from "./types";
+
+/** Application-status filter values (the 8 statuses + a synthetic "none" = untracked). */
+export type StatusFilter = AppStatus | "none";
 
 // ============================================================================
 // Canonical job-filter contract. The UI binds these exact query-param KEYS via
@@ -25,6 +28,10 @@ export interface JobFilters {
   page: number;
   pageSize: number;
   savedOnly: boolean;
+  company: string; // company-name contains
+  status: StatusFilter[]; // application-status (incl. "none" = untracked)
+  fitBand: FitBand[]; // Strong/Good/Stretch/Low
+  excludeKw: string[]; // titles/descriptions to exclude
 }
 
 /** Query-param keys (shared with the nuqs config in the UI). */
@@ -44,6 +51,10 @@ export const FILTER_KEYS = {
   page: "page",
   pageSize: "pageSize",
   savedOnly: "saved",
+  company: "company",
+  status: "status",
+  fitBand: "fitBand",
+  excludeKw: "excludeKw",
 } as const;
 
 export const FILTER_DEFAULTS: JobFilters = {
@@ -62,6 +73,10 @@ export const FILTER_DEFAULTS: JobFilters = {
   page: 1,
   pageSize: 25,
   savedOnly: false,
+  company: "",
+  status: [],
+  fitBand: [],
+  excludeKw: [],
 };
 
 export const MAX_PAGE_SIZE = 50;
@@ -78,6 +93,18 @@ const EXPERIENCE_VALUES: ExperienceLevel[] = [
 const WORKTYPE_VALUES: WorkType[] = ["remote", "hybrid", "onsite", "unknown"];
 const SORT_VALUES: SortKey[] = ["fit", "posted", "salary", "company"];
 const SINCE_VALUES: DatePosted[] = ["24h", "3d", "7d", "14d", "30d", "any"];
+export const STATUS_FILTER_VALUES: StatusFilter[] = [
+  "none",
+  "saved",
+  "applied",
+  "phone_screen",
+  "interview",
+  "offer",
+  "rejected",
+  "withdrawn",
+  "ghosted",
+];
+export const FIT_BAND_VALUES: FitBand[] = ["Strong", "Good", "Stretch", "Low"];
 
 function splitList(v: string | null): string[] {
   if (!v) return [];
@@ -147,6 +174,14 @@ export function parseJobFilters(
     page: Math.max(1, page),
     pageSize: Math.max(1, Math.min(MAX_PAGE_SIZE, pageSize)),
     savedOnly: asBool(get(FILTER_KEYS.savedOnly)),
+    company: get(FILTER_KEYS.company)?.trim() ?? "",
+    status: splitList(get(FILTER_KEYS.status)).filter((v): v is StatusFilter =>
+      (STATUS_FILTER_VALUES as string[]).includes(v),
+    ),
+    fitBand: splitList(get(FILTER_KEYS.fitBand)).filter((v): v is FitBand =>
+      (FIT_BAND_VALUES as string[]).includes(v),
+    ),
+    excludeKw: splitList(get(FILTER_KEYS.excludeKw)),
   };
 }
 
@@ -178,5 +213,9 @@ export function activeFilterCount(f: JobFilters): number {
   if (f.relocate) n++;
   if (f.since !== "any") n++;
   if (f.fit > 0) n++;
+  if (f.company) n++;
+  if (f.status.length) n++;
+  if (f.fitBand.length) n++;
+  if (f.excludeKw.length) n++;
   return n;
 }

@@ -93,6 +93,18 @@ class GreenhouseSource:
 
             is_remote = bool(location_raw and "remote" in location_raw.lower())
 
+            # Prefer the ORIGINAL publish time. An edited old role still carries
+            # its first_published; using updated_at would make it look brand-new
+            # and out-rank genuinely fresh postings. Fall back to a publish-ish
+            # field, and only to updated_at as a last resort. Never let an update
+            # time override an existing first-publish.
+            posted_at = (
+                item.get("first_published")
+                or item.get("published_at")
+                or item.get("created_at")
+                or item.get("updated_at")
+            )
+
             return RawJob(
                 source_slug="greenhouse",
                 external_id=ext_id,
@@ -103,7 +115,7 @@ class GreenhouseSource:
                 description_is_html=True,
                 location_raw=location_raw,
                 is_remote=is_remote,
-                posted_at=item.get("updated_at") or item.get("first_published"),
+                posted_at=posted_at,
                 raw=item,
             )
         except Exception as exc:

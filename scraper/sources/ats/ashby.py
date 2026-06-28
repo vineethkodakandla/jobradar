@@ -90,6 +90,11 @@ class AshbySource:
 
             smin, smax = cls._parse_compensation(item.get("compensation"))
 
+            # Prefer the ORIGINAL publish time over the last-updated time, so an
+            # edited old posting doesn't masquerade as brand-new. Only fall back
+            # to updatedAt when no publish time exists.
+            posted_at = item.get("publishedAt") or item.get("updatedAt")
+
             return RawJob(
                 source_slug="ashby",
                 external_id=ext_id,
@@ -108,7 +113,7 @@ class AshbySource:
                 salary_is_estimated=False,
                 employment_type=employment_type,
                 experience_hint=employment_type,
-                posted_at=item.get("publishedAt") or item.get("updatedAt"),
+                posted_at=posted_at,
                 raw=item,
             )
         except Exception as exc:

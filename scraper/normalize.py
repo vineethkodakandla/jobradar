@@ -57,9 +57,15 @@ _YEARS_RE = re.compile(
 )
 
 # Title classifier keyword groups (most senior first — first match wins).
+# TRUE individual-contributor seniority -> 'senior'.
 _TITLE_SENIOR = re.compile(
-    r"\b(senior|sr\.?|staff|principal|lead|architect|distinguished|head\s+of|"
-    r"director|vp|manager)\b",
+    r"\b(senior|sr\.?|staff|principal|lead|architect|distinguished)\b",
+    re.IGNORECASE,
+)
+# MANAGEMENT titles -> 'lead' (NOT 'senior'). These are people-management roles
+# and must not be force-promoted past a structured intern/new_grad/entry hint.
+_TITLE_MANAGEMENT = re.compile(
+    r"\b(manager|director|vp|v\.p\.|head\s+of)\b",
     re.IGNORECASE,
 )
 _TITLE_INTERN = re.compile(r"\b(intern|internship|co-?op|trainee)\b", re.IGNORECASE)
@@ -68,21 +74,50 @@ _TITLE_NEWGRAD = re.compile(
     r"junior|jr\.?|grad(?:uate)?\s+(?:engineer|program|role))\b",
     re.IGNORECASE,
 )
-_TITLE_MID = re.compile(r"\b(mid[\s-]*level|\bii\b|\b2\b|intermediate)\b", re.IGNORECASE)
+# Mid-level: an explicit "mid-level"/"intermediate", OR a level number ("II"/"2")
+# but only in an engineering/technical context (so "Sales 2" isn't mis-mid'd).
+_TITLE_MID_EXPLICIT = re.compile(r"\b(mid[\s-]*level|intermediate)\b", re.IGNORECASE)
+_TITLE_MID_LEVELNUM = re.compile(r"\b(ii|2)\b", re.IGNORECASE)
+_ENG_CONTEXT_RE = re.compile(
+    r"\b(engineer|engineering|developer|swe|sde|programmer|scientist|architect)\b",
+    re.IGNORECASE,
+)
 
 # Free-text salary patterns (fallback when no structured numbers).
 #   $120k - $150k   /   $120,000 to $150,000   /   $60/hr   /   $150k
+#   $8,000/month   /   $120,000 - 150k   (mixed full/k range)
 _SALARY_RANGE_K_RE = re.compile(
     r"\$?\s*(\d{2,3})\s*[kK]\s*(?:-|–|—|to)\s*\$?\s*(\d{2,3})\s*[kK]"
 )
 _SALARY_RANGE_FULL_RE = re.compile(
     r"\$\s*(\d{2,3}(?:,\d{3})+)\s*(?:-|–|—|to)\s*\$?\s*(\d{2,3}(?:,\d{3})+)"
 )
+# Mixed range: a full number on one side and a k-number on the other, in either
+# order — "$120,000 - 150k" or "$120k - 150,000".
+_SALARY_RANGE_MIXED_RE = re.compile(
+    r"\$\s*(\d{2,3}(?:,\d{3})+)\s*(?:-|–|—|to)\s*\$?\s*(\d{2,3})\s*[kK]\b"
+    r"|"
+    r"\$\s*(\d{2,3})\s*[kK]\s*(?:-|–|—|to)\s*\$?\s*(\d{2,3}(?:,\d{3})+)"
+)
 _SALARY_HOURLY_RE = re.compile(
-    r"\$\s*(\d{2,3}(?:\.\d{1,2})?)\s*(?:/|\s*per\s*)\s*(?:hr|hour)", re.IGNORECASE
+    r"\$\s*(\d{1,3}(?:\.\d{1,2})?)\s*(?:/|\s*per\s*)\s*(?:hr|hour)", re.IGNORECASE
+)
+_SALARY_MONTHLY_RE = re.compile(
+    r"\$\s*(\d{1,3}(?:,\d{3})+|\d{3,6})\s*(?:/|\s*per\s*)\s*(?:mo|month)",
+    re.IGNORECASE,
 )
 _SALARY_SINGLE_K_RE = re.compile(r"\$\s*(\d{2,3})\s*[kK]\b")
 _SALARY_SINGLE_FULL_RE = re.compile(r"\$\s*(\d{2,3}(?:,\d{3})+)")
+# A lone number (no "$", no "k") preceded by a period word, e.g.
+# "annual salary of 150000" — only trusted with that leading cue.
+_SALARY_LONE_WITH_WORD_RE = re.compile(
+    r"\b(?:salary|compensation|comp|pay|base)\b[^.\d]{0,20}\$?\s*"
+    r"(\d{2,3}(?:,\d{3})+)",
+    re.IGNORECASE,
+)
+# "401" / "401(k)" guard: a money match whose digits are part of a 401(k)
+# mention is a false positive.
+_401_RE = re.compile(r"401\s*\(?\s*k", re.IGNORECASE)
 
 # US state name -> abbreviation, for pulling a 2-letter state out of free text.
 _US_STATES = {
@@ -109,12 +144,17 @@ _US_COUNTRY_TOKENS = {
     "america",
 }
 
-# Whole-word tokens that mark a posting as NOT in the US (countries / regions /
-# major non-US cities). Used by ``is_us_job``. A present US state overrides this
-# (handles "London, KY" etc.). Kept broad but conservative to avoid dropping US
-# jobs (e.g. "indiana" is safe — \bindia\b won't match inside it).
-_NON_US_TOKENS = {
-    # countries / regions
+# Canadian province abbreviations + "canada", for forcing country='CA'.
+_CA_PROVINCE_ABBRS = {
+    "on", "qc", "bc", "ab", "mb", "sk", "ns", "nb", "nl", "pe", "nt", "yt", "nu",
+}
+_CA_TOKENS = _CA_PROVINCE_ABBRS | {"canada"}
+
+# Genuine non-US country / region / province tokens. A whole-word hit here
+# (with no overriding POSITIVE US signal) marks a posting as NOT in the US.
+# NOTE: "georgia" was REMOVED — it is a US state (GA). India/indiana is safe
+# (\bindia\b won't match inside "indiana").
+_NON_US_COUNTRY_TOKENS = {
     "canada", "united kingdom", "uk", "england", "scotland", "wales", "ireland",
     "france", "germany", "deutschland", "spain", "italy", "netherlands",
     "switzerland", "sweden", "norway", "denmark", "finland", "poland",
@@ -129,13 +169,17 @@ _NON_US_TOKENS = {
     "bulgaria", "serbia", "croatia", "slovakia", "slovenia", "luxembourg",
     "iceland", "cyprus", "malta", "ontario", "quebec", "british columbia",
     "alberta", "manitoba", "nova scotia",
-    # major non-US cities
+}
+
+# Unambiguously non-US cities (no US city collides with these). A whole-word hit
+# is decisive on its own.
+_NON_US_CITIES = {
     "toronto", "montreal", "vancouver", "ottawa", "calgary", "edmonton",
-    "london", "manchester", "edinburgh", "paris", "lyon", "berlin", "munich",
+    "edinburgh", "lyon", "berlin", "munich",
     "hamburg", "frankfurt", "cologne", "amsterdam", "rotterdam", "dublin",
     "madrid", "barcelona", "valencia", "lisbon", "porto", "zurich", "geneva",
     "stockholm", "oslo", "copenhagen", "helsinki", "warsaw", "krakow", "prague",
-    "vienna", "brussels", "milan", "rome", "athens", "bucharest", "budapest",
+    "vienna", "brussels", "milan", "rome", "bucharest", "budapest",
     "bangalore", "bengaluru", "hyderabad", "mumbai", "delhi", "pune", "chennai",
     "kolkata", "gurgaon", "gurugram", "noida", "tokyo", "osaka", "kyoto",
     "beijing", "shanghai", "shenzhen", "guangzhou", "seoul", "sydney",
@@ -146,39 +190,73 @@ _NON_US_TOKENS = {
     "istanbul", "bangkok", "jakarta", "manila", "kuala lumpur", "ho chi minh",
 }
 
+# City names that ALSO name a US city (Manchester NH, Birmingham AL, Athens GA,
+# Paris TX, London KY). These only count as non-US when a genuine non-US country
+# token co-occurs in the same location blob.
+_AMBIGUOUS_CITIES = {
+    "london", "manchester", "paris", "athens", "birmingham",
+}
+
 
 def is_us_job(nj: dict[str, Any]) -> bool:
     """Heuristic US-only filter (spec: owner wants USA jobs only).
 
-    A present US state => US; an explicit non-US country or a non-US token in the
-    location => non-US; otherwise assume US (a bare "Remote" or unrecognized city
-    is kept). Tokens are matched as whole words so US look-alikes survive
-    (e.g. "Indiana" is not matched by "india").
+    POSITIVE US signal wins FIRST: a US state abbr/name, a US country token, or a
+    ", US"/"United States" in location_raw => keep, regardless of any look-alike
+    city token. Only after that do we scan for genuine non-US signals. Tokens are
+    matched as whole words so US look-alikes survive (e.g. "Indiana" is not
+    matched by "india"). An ambiguous city (Manchester/London/Paris/Athens/
+    Birmingham) is non-US only when a real non-US country token co-occurs.
     """
     blob = " ".join(
         x for x in (nj.get("location_raw"), nj.get("city"), nj.get("country")) if x
     ).lower()
-    # Canada is the main false positive: "City, ON, CA" mis-parses the "CA"
-    # country code as California, so check Canadian provinces / "canada" BEFORE
-    # the US-state shortcut. (No US state collides with a province abbreviation.)
-    if blob and (
-        re.search(r"\bcanada\b", blob)
-        or re.search(r",\s*(?:on|qc|bc|ab|mb|sk|ns|nb|nl|pe|nt|yt|nu)\b", blob)
-    ):
-        return False
+    location_raw = (nj.get("location_raw") or "")
+
+    # --- POSITIVE US signals (win first) ------------------------------------
     state = (nj.get("state") or "").upper()
     if state in _STATE_ABBRS:
         return True
     country = (nj.get("country") or "").upper()
-    if country and country not in (
+    if country in (
         "US", "USA", "UNITED STATES", "UNITED STATES OF AMERICA", "AMERICA",
+    ):
+        return True
+    if re.search(r",\s*us\b|united states", location_raw, re.IGNORECASE):
+        return True
+    # A US state name/abbr present anywhere in the blob is a positive signal.
+    if blob:
+        for name in _US_STATES:
+            if re.search(r"\b" + re.escape(name) + r"\b", blob):
+                return True
+        for abbr in _STATE_ABBRS:
+            if re.search(r",\s*" + abbr.lower() + r"\b", blob):
+                return True
+
+    # --- NEGATIVE signals (only reached when no positive US signal) ---------
+    # A declared non-US country code/name discards immediately.
+    if country and country not in (
+        "US", "USA", "UNITED STATES", "UNITED STATES OF AMERICA", "AMERICA", "",
     ):
         return False
     if not blob:
         return True
-    for tok in _NON_US_TOKENS:
+
+    # Canadian provinces: "City, ON" etc. (no US state collides with these).
+    if re.search(r",\s*(?:on|qc|bc|ab|mb|sk|ns|nb|nl|pe|nt|yt|nu)\b", blob):
+        return False
+
+    has_country = any(
+        re.search(r"\b" + re.escape(tok) + r"\b", blob)
+        for tok in _NON_US_COUNTRY_TOKENS
+    )
+    if has_country:
+        return False
+    for tok in _NON_US_CITIES:
         if re.search(r"\b" + re.escape(tok) + r"\b", blob):
             return False
+    # Ambiguous cities only count as non-US alongside a real country token
+    # (handled above) — on their own they are kept as possible US cities.
     return True
 
 
@@ -290,6 +368,48 @@ def normalize_location_key(
     return " ".join(parts) if parts else "remote"
 
 
+# Title canonicalization for the dedupe hash (NOT for the human-facing title).
+_TITLE_PAREN_RE = re.compile(r"\([^)]*\)|\[[^\]]*\]")     # "(Remote)" / "[Contract]"
+_TITLE_TRAILING_LOC_RE = re.compile(
+    r"\s[-–—]\s.+$",                                       # " - San Francisco"
+)
+_TITLE_TRAILING_ST_RE = re.compile(r",\s*[a-z]{2}\s*$", re.IGNORECASE)  # ", CA"
+# Roman-numeral / level tokens: I/II/III/IV..., L4, Level 3, etc.
+_TITLE_LEVEL_RE = re.compile(
+    r"\b(?:i{1,3}|iv|v|vi{0,3}|ix|x|l\d{1,2}|level\s*\d{1,2})\b",
+    re.IGNORECASE,
+)
+_TITLE_REQID_RE = re.compile(r"\b\d{6,}\b")               # 6+ digit req-ids
+_TITLE_SR_RE = re.compile(r"\b(?:sr|snr)\b\.?", re.IGNORECASE)
+_TITLE_JR_RE = re.compile(r"\bjr\b\.?", re.IGNORECASE)
+
+
+def normalize_title_for_hash(title: Optional[str]) -> str:
+    """Canonicalize a title for dedupe hashing ONLY.
+
+    Maps sr/snr->senior, jr->junior; strips parenthetical/bracket suffixes, a
+    trailing " - <location>" or ", <ST>", roman-numeral/level tokens, and 6+
+    digit req-ids — so "Senior Software Engineer" and "Sr. Software Engineer
+    (Remote)" collapse to the same basis. Does NOT change the stored title.
+    """
+    if not title:
+        return ""
+    text = title
+    # Drop parenthetical/bracket suffixes first ("(Remote)", "[Contract]").
+    text = _TITLE_PAREN_RE.sub(" ", text)
+    # Strip a trailing req-id and ", ST" / " - location" tail.
+    text = _TITLE_REQID_RE.sub(" ", text)
+    text = _TITLE_TRAILING_ST_RE.sub(" ", text)
+    text = _TITLE_TRAILING_LOC_RE.sub(" ", text)
+    # sr/snr -> senior, jr -> junior (before punctuation strip eats the dots).
+    text = _TITLE_SR_RE.sub("senior", text)
+    text = _TITLE_JR_RE.sub("junior", text)
+    # Drop roman-numeral / level tokens (II, III, L4, Level 3).
+    text = _TITLE_LEVEL_RE.sub(" ", text)
+    # Final token normalize: lowercase, depunctuate, collapse whitespace.
+    return _norm_token(text)
+
+
 def dedupe_hash(
     company: Optional[str],
     title: Optional[str],
@@ -297,13 +417,17 @@ def dedupe_hash(
     state: Optional[str],
     is_remote: bool,
 ) -> str:
-    """sha256(lower(normalize(company)|normalize(title)|normalize(loc))).
+    """sha256(lower(normalize(company)|normalize_title_for_hash(title)|loc)).
 
+    The title segment is canonicalized (sr->senior, suffixes/levels/req-ids
+    stripped) so trivially-different titles for the same role hash identically.
     The location segment reduces to 'remote' or 'city state'. Stable across
     re-runs and across sources for the same logical posting.
     """
     loc = normalize_location_key(city, state, is_remote)
-    basis = "|".join((normalize_company(company), _norm_token(title), loc))
+    basis = "|".join(
+        (normalize_company(company), normalize_title_for_hash(title), loc)
+    )
     return hashlib.sha256(basis.encode("utf-8")).hexdigest()
 
 
@@ -338,10 +462,26 @@ def parse_location(
         # split "City, ST" / "City, State, Country"
         segs = [s.strip() for s in re.split(r"[,/|]", raw) if s.strip()]
         segs = [s for s in segs if not re.fullmatch(r"(?i)remote|anywhere|worldwide", s)]
+
+        # Canadian province / "canada" anywhere => CA. Clear any mis-parsed
+        # city/state (e.g. "ON" is not a US state; "Toronto, ON" is not a US row).
+        seg_lows = {s.lower() for s in segs}
+        if seg_lows & _CA_TOKENS:
+            country = "CA"
+            city = None
+            state = None
+            segs = []  # don't pull a city/state from a Canadian location
+
         if segs:
-            if not city:
+            # When the posting looks remote and the source gave no city hint, do
+            # NOT treat the first segment as a city — "Remote, US" must not yield
+            # city="Remote"-adjacent garbage, and "Remote - EMEA" must not set a
+            # city. Country/state detection below still runs on every segment.
+            seg_iter = segs
+            if not city and not looks_remote:
                 city = segs[0] or None
-            for seg in segs[1:]:
+                seg_iter = segs[1:]
+            for seg in seg_iter:
                 seg_low = seg.lower()
                 if seg_low in _US_COUNTRY_TOKENS:
                     country = country or "US"
@@ -361,7 +501,7 @@ def parse_location(
     else:
         country = "US"  # default per schema
 
-    # A US state present implies US.
+    # A US state present implies US (overrides a stray non-US country guess).
     if state in _STATE_ABBRS:
         country = "US"
 
@@ -414,20 +554,35 @@ def _to_annual(amount: float, period: Optional[str]) -> Optional[float]:
     return annual
 
 
+def _canonical_period(declared: Optional[str]) -> Optional[str]:
+    """Map a source-declared period string to a canonical token, or None."""
+    if not declared:
+        return None
+    d = declared.lower()
+    if d in ("hour", "hourly", "hr"):
+        return "hour"
+    if d in ("month", "monthly", "mo"):
+        return "month"
+    if d in ("week", "weekly"):
+        return "week"
+    if d in ("day", "daily"):
+        return "day"
+    if d in ("year", "yearly", "annual", "annually"):
+        return "year"
+    return None
+
+
 def _infer_period(amount: float, declared: Optional[str]) -> str:
-    """Pick a sensible period; a bare number under ~2000 is almost certainly hourly."""
-    if declared:
-        d = declared.lower()
-        if d in ("hour", "hourly", "hr"):
-            return "hour"
-        if d in ("month", "monthly", "mo"):
-            return "month"
-        if d in ("week", "weekly"):
-            return "week"
-        if d in ("day", "daily"):
-            return "day"
-        if d in ("year", "yearly", "annual", "annually"):
-            return "year"
+    """Pick a sensible period.
+
+    If the source declared an explicit period, TRUST it — the magnitude
+    heuristic only runs when the period is unknown/None. (A source-labeled
+    annual value below the floor is handled as out-of-bounds in
+    ``normalize_salary``, never silently relabeled as monthly/hourly.)
+    """
+    canon = _canonical_period(declared)
+    if canon is not None:
+        return canon
     if amount < 2000:
         return "hour"
     if amount < 20000:
@@ -475,65 +630,164 @@ def normalize_salary(
     return smin, smax, cur, eff_period
 
 
+def _near_401(snippet: str, start: int) -> bool:
+    """True if a 401(k) mention sits just before/after a match (false positive)."""
+    lo = max(0, start - 6)
+    window = snippet[lo : start + 12]
+    return bool(_401_RE.search(window))
+
+
 def parse_salary_from_text(
     text: Optional[str],
 ) -> tuple[Optional[int], Optional[int], Optional[str]]:
-    """Best-effort salary scrape from free text. Returns (min, max, period)."""
+    """Best-effort salary scrape from free text. Returns (min, max, period).
+
+    The returned period is DETECTED from the prose ('$60/hour' -> 'hour',
+    '$8,000/month' -> 'month', otherwise 'year'). Matches adjacent to
+    "401"/"401(k)" are skipped as false positives, and a lone bare number is
+    only trusted when preceded by a "$" or a period/comp word.
+    """
     if not text:
         return None, None, None
     snippet = text[:4000]
 
-    m = _SALARY_RANGE_K_RE.search(snippet)
-    if m:
+    # Explicit period in prose wins first so we don't mis-read an hourly/monthly
+    # figure as annual.
+    for m in _SALARY_HOURLY_RE.finditer(snippet):
+        if _near_401(snippet, m.start(1)):
+            continue
+        rate = float(m.group(1))
+        smin, smax, _, _ = normalize_salary(rate, None, "hour", "USD")
+        if smin is not None or smax is not None:
+            return smin, smax, "hour"
+
+    for m in _SALARY_MONTHLY_RE.finditer(snippet):
+        if _near_401(snippet, m.start(1)):
+            continue
+        val = float(m.group(1).replace(",", ""))
+        smin, smax, _, _ = normalize_salary(val, None, "month", "USD")
+        if smin is not None or smax is not None:
+            return smin, smax, "month"
+
+    # Mixed full/k range, e.g. "$120,000 - 150k" or "$120k - 150,000".
+    for m in _SALARY_RANGE_MIXED_RE.finditer(snippet):
+        if _near_401(snippet, m.start()):
+            continue
+        if m.group(1) is not None:       # full - k
+            lo = int(m.group(1).replace(",", ""))
+            hi = int(m.group(2)) * 1000
+        else:                            # k - full
+            lo = int(m.group(3)) * 1000
+            hi = int(m.group(4).replace(",", ""))
+        smin, smax, _, _ = normalize_salary(lo, hi, "year", "USD")
+        if smin is not None or smax is not None:
+            return smin, smax, "year"
+
+    for m in _SALARY_RANGE_K_RE.finditer(snippet):
+        if _near_401(snippet, m.start()):
+            continue
         lo, hi = int(m.group(1)) * 1000, int(m.group(2)) * 1000
         smin, smax, _, _ = normalize_salary(lo, hi, "year", "USD")
-        return smin, smax, "year"
+        if smin is not None or smax is not None:
+            return smin, smax, "year"
 
-    m = _SALARY_RANGE_FULL_RE.search(snippet)
-    if m:
+    for m in _SALARY_RANGE_FULL_RE.finditer(snippet):
+        if _near_401(snippet, m.start()):
+            continue
         lo = int(m.group(1).replace(",", ""))
         hi = int(m.group(2).replace(",", ""))
         smin, smax, _, _ = normalize_salary(lo, hi, "year", "USD")
-        return smin, smax, "year"
+        if smin is not None or smax is not None:
+            return smin, smax, "year"
 
-    m = _SALARY_HOURLY_RE.search(snippet)
-    if m:
-        rate = float(m.group(1))
-        smin, smax, _, _ = normalize_salary(rate, None, "hour", "USD")
-        return smin, smax, "hour"
-
-    m = _SALARY_SINGLE_K_RE.search(snippet)
-    if m:
+    for m in _SALARY_SINGLE_K_RE.finditer(snippet):
+        if _near_401(snippet, m.start()):
+            continue
         val = int(m.group(1)) * 1000
         smin, smax, _, _ = normalize_salary(val, None, "year", "USD")
-        return smin, smax, "year"
+        if smin is not None or smax is not None:
+            return smin, smax, "year"
 
-    m = _SALARY_SINGLE_FULL_RE.search(snippet)
-    if m:
+    for m in _SALARY_SINGLE_FULL_RE.finditer(snippet):
+        if _near_401(snippet, m.start()):
+            continue
         val = int(m.group(1).replace(",", ""))
         smin, smax, _, _ = normalize_salary(val, None, "year", "USD")
-        return smin, smax, "year"
+        if smin is not None or smax is not None:
+            return smin, smax, "year"
+
+    # Lone number only when a period/comp word leads it (no "$" needed there).
+    for m in _SALARY_LONE_WITH_WORD_RE.finditer(snippet):
+        if _near_401(snippet, m.start(1)):
+            continue
+        val = int(m.group(1).replace(",", ""))
+        smin, smax, _, _ = normalize_salary(val, None, "year", "USD")
+        if smin is not None or smax is not None:
+            return smin, smax, "year"
 
     return None, None, None
 
 
 # --- experience parsing ------------------------------------------------------
 
-def _years_from_text(text: Optional[str]) -> tuple[Optional[int], Optional[int]]:
-    """Min/max years found in free text. Takes the MIN across all matches."""
-    if not text:
-        return None, None
+# Cues that mark a "N years" mention as a real experience requirement (as
+# opposed to "1 year of free gym"). A cue must sit within ~60 chars of the match.
+_EXP_CUE_RE = re.compile(
+    r"experience|required|require|at\s+least|minimum|min\.|yoe|years?\s+of\b",
+    re.IGNORECASE,
+)
+# Section headers that begin the requirements/qualifications portion.
+_REQ_SECTION_RE = re.compile(
+    r"\b(requirements?|qualifications?|what\s+you'?ll\s+need|"
+    r"who\s+you\s+are|minimum\s+qualifications?|basic\s+qualifications?)\b",
+    re.IGNORECASE,
+)
+
+
+def _years_in_blob(blob: str) -> tuple[Optional[int], Optional[int]]:
+    """MIN/MAX years in a blob, counting only experience-cued, sane matches."""
     best_min: Optional[int] = None
     best_max: Optional[int] = None
-    for m in _YEARS_RE.finditer(text[:6000]):
+    for m in _YEARS_RE.finditer(blob):
         lo = int(m.group(1))
         hi = int(m.group(2)) if m.group(2) else None
-        if lo > 40:  # nonsense (e.g. "401k")
+        if lo > 40:  # nonsense (e.g. "401k" matched as "401 years")
+            continue
+        # 401k guard: a "401" immediately before the number is a benefits ref.
+        pre = blob[max(0, m.start() - 6) : m.start()]
+        if _401_RE.search(pre + m.group(0)[:4]):
+            continue
+        # Require an experience cue within ~60 chars on either side, so
+        # "1 year of free gym membership" doesn't drag a real "5+ years" down.
+        ctx = blob[max(0, m.start() - 60) : m.end() + 60]
+        if not _EXP_CUE_RE.search(ctx):
             continue
         if best_min is None or lo < best_min:
             best_min = lo
             best_max = hi if hi is not None else lo
     return best_min, best_max
+
+
+def _years_from_text(text: Optional[str]) -> tuple[Optional[int], Optional[int]]:
+    """Min/max experience-years from free text.
+
+    Counts a "N years" match only when an experience cue
+    ("experience"/"required"/"at least"/"minimum"/"yoe"/"years of") sits within
+    ~60 chars, so incidental numbers ("1 year of free gym") are ignored. The
+    requirements/qualifications section, if found, is preferred over the rest.
+    """
+    if not text:
+        return None, None
+    snippet = text[:6000]
+
+    # Prefer the requirements/qualifications portion when present.
+    sec = _REQ_SECTION_RE.search(snippet)
+    if sec:
+        req_min, req_max = _years_in_blob(snippet[sec.start():])
+        if req_min is not None:
+            return req_min, req_max
+
+    return _years_in_blob(snippet)
 
 
 def _level_from_years(years_min: Optional[int]) -> Optional[str]:
@@ -570,7 +824,13 @@ def _level_from_structured(hint: Optional[str], employment_type: Optional[str]) 
 
 
 def _level_from_title(title: Optional[str]) -> Optional[str]:
-    """Title classifier. Senior/staff/principal/lead ALWAYS wins (checked first)."""
+    """Title classifier.
+
+    Returns one of 'senior' (true IC seniority), 'lead' (management),
+    'intern', 'new_grad', 'mid', or None. TRUE seniority is checked before
+    management so "Senior Engineering Manager" reads 'senior', but a bare
+    management title ("Product Manager") reads 'lead', not 'senior'.
+    """
     if not title:
         return None
     if _TITLE_SENIOR.search(title):
@@ -579,7 +839,11 @@ def _level_from_title(title: Optional[str]) -> Optional[str]:
         return "intern"
     if _TITLE_NEWGRAD.search(title):
         return "new_grad"
-    if _TITLE_MID.search(title):
+    if _TITLE_MANAGEMENT.search(title):
+        return "lead"
+    if _TITLE_MID_EXPLICIT.search(title):
+        return "mid"
+    if _TITLE_MID_LEVELNUM.search(title) and _ENG_CONTEXT_RE.search(title):
         return "mid"
     return None
 
@@ -604,11 +868,15 @@ def classify_experience(
     structured = _level_from_structured(structured_hint, employment_type)
     title_level = _level_from_title(title)
 
-    # Senior title beats everything (spec: "Senior word always wins over a low
-    # years number" — and also over a misleading structured 'entry' label).
+    # A TRUE senior title (senior/staff/principal/lead-IC/architect) beats
+    # everything (spec: "Senior word always wins over a low years number" — and
+    # over a misleading structured 'entry' label).
     if title_level == "senior":
         return "senior", years_min, years_max
 
+    # A structured intern/new_grad/entry/etc. hint OVERRIDES a bare management
+    # title ('lead'). Management is a people-leadership signal, not IC seniority,
+    # so an explicit junior structured level must win.
     if structured:
         return structured, years_min, years_max
 

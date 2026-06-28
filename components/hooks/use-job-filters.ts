@@ -73,6 +73,10 @@ function buildParsers() {
     [FILTER_KEYS.sort]: parseAsStringEnum<SortKey>(SORT_VALUES).withDefault(
       FILTER_DEFAULTS.sort,
     ),
+    [FILTER_KEYS.company]: parseAsString.withDefault(FILTER_DEFAULTS.company),
+    [FILTER_KEYS.status]: parseAsArrayOf(parseAsString, ",").withDefault([]),
+    [FILTER_KEYS.fitBand]: parseAsArrayOf(parseAsString, ",").withDefault([]),
+    [FILTER_KEYS.excludeKw]: parseAsArrayOf(parseAsString, ",").withDefault([]),
   };
 }
 
@@ -108,6 +112,10 @@ export function useJobFilters(savedOnly = false): UseJobFiltersResult {
       since: raw[FILTER_KEYS.since] ?? "any",
       fit: raw[FILTER_KEYS.fit] ?? FILTER_DEFAULTS.fit,
       sort: raw[FILTER_KEYS.sort] ?? FILTER_DEFAULTS.sort,
+      company: raw[FILTER_KEYS.company] || "",
+      status: (raw[FILTER_KEYS.status] ?? []) as JobFilters["status"],
+      fitBand: (raw[FILTER_KEYS.fitBand] ?? []) as JobFilters["fitBand"],
+      excludeKw: raw[FILTER_KEYS.excludeKw] ?? [],
       page: FILTER_DEFAULTS.page,
       pageSize: FILTER_DEFAULTS.pageSize,
       savedOnly,
@@ -140,6 +148,15 @@ export function useJobFilters(savedOnly = false): UseJobFiltersResult {
       if ("fit" in patch)
         next[FILTER_KEYS.fit] = patch.fit ? patch.fit : null;
       if ("sort" in patch) next[FILTER_KEYS.sort] = patch.sort ?? null;
+      if ("company" in patch) next[FILTER_KEYS.company] = patch.company || null;
+      if ("status" in patch)
+        next[FILTER_KEYS.status] = patch.status?.length ? patch.status : null;
+      if ("fitBand" in patch)
+        next[FILTER_KEYS.fitBand] = patch.fitBand?.length ? patch.fitBand : null;
+      if ("excludeKw" in patch)
+        next[FILTER_KEYS.excludeKw] = patch.excludeKw?.length
+          ? patch.excludeKw
+          : null;
       void setRaw(next as never);
     },
     [setRaw],
@@ -159,6 +176,10 @@ export function useJobFilters(savedOnly = false): UseJobFiltersResult {
       [FILTER_KEYS.since]: null,
       [FILTER_KEYS.fit]: null,
       [FILTER_KEYS.sort]: null,
+      [FILTER_KEYS.company]: null,
+      [FILTER_KEYS.status]: null,
+      [FILTER_KEYS.fitBand]: null,
+      [FILTER_KEYS.excludeKw]: null,
     } as never);
   }, [setRaw]);
 

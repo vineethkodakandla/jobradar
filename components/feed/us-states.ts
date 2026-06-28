@@ -66,6 +66,7 @@ export const SOURCE_OPTIONS: { slug: string; label: string }[] = [
   { slug: "greenhouse", label: "Greenhouse" },
   { slug: "lever", label: "Lever" },
   { slug: "ashby", label: "Ashby" },
+  { slug: "smartrecruiters", label: "SmartRecruiters" },
 ];
 
 // Role quick-pick chips map to keyword search terms.

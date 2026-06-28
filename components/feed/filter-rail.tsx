@@ -3,7 +3,11 @@
 import * as React from "react";
 import { SlidersHorizontal } from "lucide-react";
 import type { ExperienceLevel, WorkType } from "@/lib/types";
-import { activeFilterCount } from "@/lib/filters";
+import {
+  activeFilterCount,
+  FIT_BAND_VALUES,
+  STATUS_FILTER_VALUES,
+} from "@/lib/filters";
 import { cn, formatSalary } from "@/lib/utils";
 import type { UseJobFiltersResult } from "../hooks/use-job-filters";
 import { Button } from "../ui/button";
@@ -53,6 +57,54 @@ function toggleInList<T extends string>(list: T[], value: T): T[] {
     : [...list, value];
 }
 
+const STATUS_LABELS: Record<string, string> = {
+  none: "Not tracked",
+  saved: "Saved",
+  applied: "Applied",
+  phone_screen: "Phone screen",
+  interview: "Interview",
+  offer: "Offer",
+  rejected: "Rejected",
+  withdrawn: "Withdrawn",
+  ghosted: "Ghosted",
+};
+
+/** Debounced text input (350ms) so typing doesn't refetch on every keystroke. */
+function DebouncedInput({
+  id,
+  value,
+  onChange,
+  placeholder,
+  ariaLabel,
+}: {
+  id?: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  ariaLabel?: string;
+}) {
+  const [local, setLocal] = React.useState(value);
+  React.useEffect(() => setLocal(value), [value]);
+  React.useEffect(() => {
+    const t = setTimeout(() => {
+      if (local !== value) onChange(local);
+    }, 350);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [local]);
+  return (
+    <input
+      id={id}
+      type="text"
+      aria-label={ariaLabel}
+      placeholder={placeholder}
+      value={local}
+      onChange={(e) => setLocal(e.target.value)}
+      className="w-full rounded-lg border border-border bg-background px-2 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    />
+  );
+}
+
 interface FilterRailProps {
   controller: UseJobFiltersResult;
   /** Hide the saved-only-irrelevant pieces; saved page passes true. */
@@ -82,6 +134,38 @@ function FilterRailBody({ controller, scopedSaved }: FilterRailProps) {
             </Chip>
           ))}
         </div>
+      </Section>
+
+      {/* Company */}
+      <Section title="Company" htmlFor="company-filter">
+        <DebouncedInput
+          id="company-filter"
+          ariaLabel="Filter by company name"
+          placeholder="e.g. Stripe"
+          value={f.company}
+          onChange={(company) => set({ company })}
+        />
+      </Section>
+
+      {/* Exclude keywords */}
+      <Section title="Exclude keywords" htmlFor="exclude-kw">
+        <DebouncedInput
+          id="exclude-kw"
+          ariaLabel="Exclude keywords, comma-separated"
+          placeholder="e.g. senior, clearance"
+          value={f.excludeKw.join(", ")}
+          onChange={(s) =>
+            set({
+              excludeKw: s
+                .split(",")
+                .map((t) => t.trim())
+                .filter(Boolean),
+            })
+          }
+        />
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Comma-separated; hides matching title/description.
+        </p>
       </Section>
 
       {/* Experience */}
@@ -206,6 +290,21 @@ function FilterRailBody({ controller, scopedSaved }: FilterRailProps) {
         />
       </Section>
 
+      {/* Fit band */}
+      <Section title="Fit band">
+        <div className="flex flex-wrap gap-1.5">
+          {FIT_BAND_VALUES.map((b) => (
+            <Chip
+              key={b}
+              active={f.fitBand.includes(b)}
+              onClick={() => set({ fitBand: toggleInList(f.fitBand, b) })}
+            >
+              {b}
+            </Chip>
+          ))}
+        </div>
+      </Section>
+
       {/* Source */}
       {!scopedSaved && (
         <Section title="Source">
@@ -217,6 +316,23 @@ function FilterRailBody({ controller, scopedSaved }: FilterRailProps) {
                 onClick={() => set({ src: toggleInList(f.src, s.slug) })}
               >
                 {s.label}
+              </Chip>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* Application status */}
+      {!scopedSaved && (
+        <Section title="Application status">
+          <div className="flex flex-wrap gap-1.5">
+            {STATUS_FILTER_VALUES.map((st) => (
+              <Chip
+                key={st}
+                active={f.status.includes(st)}
+                onClick={() => set({ status: toggleInList(f.status, st) })}
+              >
+                {STATUS_LABELS[st]}
               </Chip>
             ))}
           </div>

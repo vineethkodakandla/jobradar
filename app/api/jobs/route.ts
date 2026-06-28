@@ -23,6 +23,10 @@ export async function GET(request: Request) {
     fit: filters.fit,
     sort: filters.sort,
     savedOnly: filters.savedOnly,
+    company: filters.company,
+    status: filters.status,
+    fitBand: filters.fitBand,
+    excludeKw: filters.excludeKw,
     offset: (filters.page - 1) * filters.pageSize,
     limit: filters.pageSize,
   };
