@@ -209,6 +209,14 @@ class Profile:
 
 # --- skill matching ----------------------------------------------------------
 
+# Saturating skill-coverage targets: matching this much weighted core-skill (or
+# this many nice-to-haves) earns full credit. Tuned so a focused, on-target job
+# reads as a strong skill match instead of being penalized for not naming the
+# owner's entire skill set.
+MUST_TARGET_WEIGHT = 4.0
+NICE_TARGET = 3
+
+
 def _word_present(term: str, haystack: str) -> bool:
     """Whole-word/phrase presence test (alias-aware, punctuation tolerant)."""
     if not term:
@@ -244,13 +252,16 @@ def match_skills(profile: Profile, job_text: str) -> dict[str, Any]:
     matched_must = [s for s in matched if s.is_must_have]
     matched_nice = [s for s in matched if not s.is_must_have]
 
-    sum_must_w = sum(s.weight for s in must_haves)
     matched_must_w = sum(s.weight for s in matched_must)
-    must_cov = (matched_must_w / sum_must_w) if sum_must_w > 0 else 0.0
-    nice_cov = (len(matched_nice) / len(nice_haves)) if nice_haves else 0.0
+    # SATURATING coverage: a focused job that names ~MUST_TARGET_WEIGHT of the
+    # owner's core skills earns full credit. The old fraction-of-ALL-must-haves
+    # metric structurally capped good matches (5 of 17 core skills -> only 0.29).
+    # must_cov == 0 (no core skill matched at all) is preserved for the hard gate.
+    must_cov = min(1.0, matched_must_w / MUST_TARGET_WEIGHT) if must_haves else 0.0
+    nice_cov = min(1.0, len(matched_nice) / NICE_TARGET) if nice_haves else 0.0
 
     if profile.skills:
-        skill_overlap = 0.75 * must_cov + 0.25 * nice_cov
+        skill_overlap = 0.70 * must_cov + 0.30 * nice_cov
     else:
         # No parsed skills -> keyword overlap floored at 0.5 (spec §7).
         skill_overlap = 0.5

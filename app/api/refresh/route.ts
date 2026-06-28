@@ -7,7 +7,7 @@ const MIN_GAP_MS = 60_000;
 
 /**
  * Trigger the GitHub Actions scraper via repository_dispatch. Capped at
- * 10 manual runs/day (protects the free Actions-minutes budget) and ~1/min.
+ * 24 manual runs/day (protects the free Actions-minutes budget) and ~1/min.
  * Counts today's (ET) manual scrape_runs rows as the usage signal.
  */
 export async function POST() {
